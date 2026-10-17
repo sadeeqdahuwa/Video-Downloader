@@ -307,8 +307,12 @@ HTML_TEMPLATE = """
             <svg viewBox="0 0 24 24" fill="#0e8a16"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
             <span>Excel Tracker (.xlsx)</span>
         </button>
+        <button class="tb-button" onclick="syncTrackerCloud()" title="Push the latest Excel & CSV download history directly to GitHub cloud">
+            <svg viewBox="0 0 24 24" fill="#0066cc"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+            <span>Sync to Cloud</span>
+        </button>
         <button class="tb-button" onclick="openLogsDialog()" title="View live engine and download execution logs">
-            <svg viewBox="0 0 24 24" fill="#0066cc"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#555555"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
             <span>Live Logs</span>
         </button>
     </div>
@@ -748,7 +752,20 @@ HTML_TEMPLATE = """
                     box.scrollTop = box.scrollHeight;
                 }
             }
-        } catch (e) {}
+    async function syncTrackerCloud() {
+        document.getElementById('sb-status-text').innerText = 'Syncing Excel & CSV trackers to GitHub cloud...';
+        try {
+            const resp = await fetch('/api/sync_cloud', {method: 'POST'});
+            const res = await resp.json();
+            if (res.success) {
+                alert('Spreadsheet tracker successfully synced and pushed to GitHub cloud!');
+            } else {
+                alert('Cloud sync status: ' + (res.message || res.error || 'Done'));
+            }
+        } catch (e) {
+            alert('Cloud sync error: ' + e);
+        }
+        pollStatusOnce();
     }
 
     // Start auto polling as soon as DOM loads
@@ -892,6 +909,13 @@ def open_tracker_endpoint():
         except Exception as e:
             return jsonify({"error": f"Could not launch Excel: {e}"}), 500
     return jsonify({"success": True, "path": xlsx_path})
+
+
+@app.route("/api/sync_cloud", methods=["POST"])
+def sync_cloud_endpoint():
+    from core.history_tracker import sync_tracker_to_cloud
+    res = sync_tracker_to_cloud(log_callback=downloader.log)
+    return jsonify(res)
 
 
 if __name__ == "__main__":

@@ -15,10 +15,6 @@ dist/
 *.exe
 *.log
 
-# Tracker spreadsheets
-*.xlsx
-*.csv
-
 # Downloaded media files
 *.mp4
 *.mkv
