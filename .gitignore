@@ -13,6 +13,11 @@ __pycache__/
 build/
 dist/
 *.exe
+*.log
+
+# Tracker spreadsheets
+*.xlsx
+*.csv
 
 # Downloaded media files
 *.mp4

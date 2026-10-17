@@ -302,6 +302,15 @@ HTML_TEMPLATE = """
             <svg viewBox="0 0 24 24" fill="#cc0000"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             <span>Clear All</span>
         </button>
+        <div class="tb-separator"></div>
+        <button class="tb-button" onclick="openExcelTracker()" title="Open Excel spreadsheet tracking all URLs, filenames, and full description texts">
+            <svg viewBox="0 0 24 24" fill="#0e8a16"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+            <span>Excel Tracker (.xlsx)</span>
+        </button>
+        <button class="tb-button" onclick="openLogsDialog()" title="View live engine and download execution logs">
+            <svg viewBox="0 0 24 24" fill="#0066cc"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
+            <span>Live Logs</span>
+        </button>
     </div>
 
     <!-- Workspace Body -->
@@ -407,6 +416,25 @@ HTML_TEMPLATE = """
         <div class="win-modal-footer">
             <button class="win-btn" onclick="closeAddDialog()">Cancel</button>
             <button class="win-btn primary" onclick="submitDownloads()">Start Download</button>
+        </div>
+    </div>
+</div>
+
+<!-- Live Logs Modal Dialog -->
+<div class="win-modal-backdrop" id="logs-modal">
+    <div class="win-modal-box" style="width: 780px; max-width: 95vw;">
+        <div class="win-modal-header">
+            <span>Live Execution Logs (Real-time Engine Logs)</span>
+            <span style="cursor: pointer; font-size: 14px;" onclick="closeLogsDialog()">✕</span>
+        </div>
+        <div class="win-modal-body">
+            <div style="font-size: 11px; color: #555555;">Real-time logs for multi-threading, fragment fetching, FFmpeg merging, and Excel tracker updates:</div>
+            <textarea class="win-textarea" id="logs-textarea" readonly style="height: 320px; background: #1e1e1e; color: #00ff66; font-family: Consolas, monospace; font-size: 11px; line-height: 1.4;"></textarea>
+        </div>
+        <div class="win-modal-footer">
+            <button class="win-btn" onclick="fetchLogs()">Refresh</button>
+            <button class="win-btn" onclick="navigator.clipboard.writeText(document.getElementById('logs-textarea').value); alert('Logs copied to clipboard!');">Copy Logs</button>
+            <button class="win-btn primary" onclick="closeLogsDialog()">Close</button>
         </div>
     </div>
 </div>
@@ -684,6 +712,43 @@ HTML_TEMPLATE = """
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({folder: folder || ''})
         });
+    async function openExcelTracker() {
+        const saveDir = document.getElementById('modal-save-folder') ? document.getElementById('modal-save-folder').value.trim() : '';
+        const resp = await fetch('/api/open_tracker', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder: saveDir})
+        });
+        const res = await resp.json();
+        if (res.error) alert(res.error);
+    }
+
+    let logsInterval = null;
+    async function openLogsDialog() {
+        document.getElementById('logs-modal').style.display = 'flex';
+        await fetchLogs();
+        if (logsInterval) clearInterval(logsInterval);
+        logsInterval = setInterval(fetchLogs, 1500);
+    }
+
+    function closeLogsDialog() {
+        document.getElementById('logs-modal').style.display = 'none';
+        if (logsInterval) clearInterval(logsInterval);
+    }
+
+    async function fetchLogs() {
+        try {
+            const resp = await fetch('/api/logs');
+            const data = await resp.json();
+            const box = document.getElementById('logs-textarea');
+            if (box && data.logs) {
+                const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 50;
+                box.value = data.logs.join('\n');
+                if (atBottom) {
+                    box.scrollTop = box.scrollHeight;
+                }
+            }
+        } catch (e) {}
     }
 
     // Start auto polling as soon as DOM loads
@@ -792,13 +857,55 @@ def open_folder_endpoint():
     folder = data.get("folder", "").strip() or get_default_download_dir()
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True)
-    if sys.platform == "win32":
-        os.startfile(folder)
     return jsonify({"success": True})
 
 
+@app.route("/api/logs")
+def get_logs_endpoint():
+    return jsonify({"logs": downloader.get_logs()})
+
+
+@app.route("/api/open_tracker", methods=["POST"])
+def open_tracker_endpoint():
+    data = request.get_json() or {}
+    folder = data.get("folder", "").strip() or get_default_download_dir()
+    os.makedirs(folder, exist_ok=True)
+    from core.history_tracker import get_tracker_path, record_download_history
+    xlsx_path = get_tracker_path(folder)
+    if not os.path.isfile(xlsx_path):
+        # Create initial empty template if file does not exist yet
+        record_download_history({
+            "status": "INITIALIZED",
+            "clean_title": "All Video Downloader Pro Tracker",
+            "filename": "",
+            "raw_title": "",
+            "description": "This Excel spreadsheet automatically tracks all downloaded video URLs, clean filenames, and full description captions.",
+            "url": "https://github.com/sadeeqdahuwa/Video-Downloader",
+            "size": "—",
+            "duration": "—",
+            "format": "System",
+            "file_path": folder,
+        }, folder)
+    if sys.platform == "win32":
+        try:
+            os.startfile(xlsx_path)
+        except Exception as e:
+            return jsonify({"error": f"Could not launch Excel: {e}"}), 500
+    return jsonify({"success": True, "path": xlsx_path})
+
+
 if __name__ == "__main__":
+    import threading
+    import time
+    import webbrowser
+
     port = 5000
     print(f"Starting All Video Downloader Pro UI on http://127.0.0.1:{port}")
+
+    def _open_browser():
+        time.sleep(1.0)
+        webbrowser.open(f"http://127.0.0.1:{port}")
+
+    threading.Thread(target=_open_browser, daemon=True).start()
     app.run(host="127.0.0.1", port=port, debug=False)
 

@@ -21,7 +21,9 @@ from typing import Any, Callable
 
 import yt_dlp
 
+import datetime
 from core.config import DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir
+from core.history_tracker import get_tracker_path, record_download_history
 from core.title_sanitizer import sanitize_title
 
 
@@ -34,6 +36,9 @@ class TaskProgress:
     id: int
     url: str
     title: str = "Queued..."
+    raw_title: str = ""
+    description: str = ""
+    duration_str: str = "—"
     status: str = "QUEUED"  # QUEUED, CONNECTING, DOWNLOADING, POST_PROCESSING, COMPLETED, PAUSED, ERROR
     percent: float = 0.0
     speed: str = "—"
@@ -50,25 +55,40 @@ class TaskProgress:
 
 
 # ---------------------------------------------------------------------------
-# Custom YoutubeDL Subclass with Built-in Title Sanitization
+# Custom YoutubeDL Subclass with Built-in Title Sanitization & Metadata Capture
 # ---------------------------------------------------------------------------
 
 class SanitizedYoutubeDL(yt_dlp.YoutubeDL):
     """
     Subclass that automatically intercepts all video metadata and passes
     the title through our TitleSanitizer before filenames are generated on disk.
-    This guarantees that Facebook reaction counts, view counts, and HTML entities
-    (like &#039;) are stripped from both the UI and the saved files.
+    Also calls metadata_callback to record raw titles and full descriptions.
     """
 
+    def __init__(self, *args, metadata_callback: Callable[[dict[str, Any]], None] | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._meta_cb = metadata_callback
+
     def process_video_result(self, info_dict: dict[str, Any], download: bool = True) -> dict[str, Any]:
-        if info_dict and info_dict.get("title"):
-            info_dict["title"] = sanitize_title(info_dict["title"])
+        if info_dict:
+            if self._meta_cb:
+                try:
+                    self._meta_cb(info_dict)
+                except Exception:
+                    pass
+            if info_dict.get("title"):
+                info_dict["title"] = sanitize_title(info_dict["title"])
         return super().process_video_result(info_dict, download=download)
 
     def process_ie_result(self, ie_result: dict[str, Any], download: bool = True, extra_info: dict[str, Any] | None = None) -> dict[str, Any]:
-        if ie_result and ie_result.get("title"):
-            ie_result["title"] = sanitize_title(ie_result["title"])
+        if ie_result:
+            if self._meta_cb:
+                try:
+                    self._meta_cb(ie_result)
+                except Exception:
+                    pass
+            if ie_result.get("title"):
+                ie_result["title"] = sanitize_title(ie_result["title"])
         return super().process_ie_result(ie_result, download=download, extra_info=extra_info)
 
 
@@ -106,9 +126,20 @@ def _format_speed(bps: float | None) -> str:
 
 
 class _YDLLogger:
-    def debug(self, msg: str) -> None: pass
-    def warning(self, msg: str) -> None: pass
-    def error(self, msg: str) -> None: pass
+    def __init__(self, log_callback: Callable[[str], None] | None = None):
+        self.log_callback = log_callback
+
+    def debug(self, msg: str) -> None:
+        if self.log_callback and any(msg.startswith(p) for p in ("[download]", "[Merger]", "[ExtractAudio]", "[ffmpeg]")):
+            self.log_callback(msg)
+
+    def warning(self, msg: str) -> None:
+        if self.log_callback:
+            self.log_callback(f"[WARN] {msg}")
+
+    def error(self, msg: str) -> None:
+        if self.log_callback:
+            self.log_callback(f"[ERROR] {msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -124,12 +155,35 @@ class Downloader:
     def __init__(self, max_parallel: int = 4):
         self.default_parallel = max_parallel
         self.tasks: list[TaskProgress] = []
+        self.logs: list[str] = []
+        self._log_file = "downloader.log"
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._paused_task_ids: set[int] = set()
         self._manager_thread: threading.Thread | None = None
         self._is_running = False
         self._next_id = 1
+        self.log("All Video Downloader Pro engine initialized (4x parallel mode).")
+
+    def log(self, msg: str) -> None:
+        """Record a timestamped log line to memory, stdout, and downloader.log file."""
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        entry = f"[{timestamp}] {msg}"
+        print(entry)
+        with self._lock:
+            self.logs.append(entry)
+            if len(self.logs) > 600:
+                self.logs.pop(0)
+        try:
+            with open(self._log_file, "a", encoding="utf-8") as f:
+                f.write(entry + "\n")
+        except Exception:
+            pass
+
+    def get_logs(self) -> list[str]:
+        """Return a copy of recent log messages."""
+        with self._lock:
+            return list(self.logs)
 
     def fetch_info(self, url: str) -> dict[str, Any]:
         """Fetch metadata for a single URL and return sanitized title."""
@@ -371,6 +425,18 @@ class Downloader:
                         task.status = "POST_PROCESSING"
                         task.percent = 100.0
 
+            def metadata_cb(info_dict: dict[str, Any]) -> None:
+                with self._lock:
+                    if not task.raw_title:
+                        task.raw_title = info_dict.get("title", "") or ""
+                    if not task.description:
+                        task.description = info_dict.get("description", "") or ""
+                    dur = info_dict.get("duration") or 0
+                    if dur and task.duration_str == "—":
+                        task.duration_str = _format_eta(dur)
+                if task.description:
+                    self.log(f"[Task #{task.id}] Captured video description ({len(task.description)} chars)")
+
             outtmpl = os.path.join(task.save_dir or get_default_download_dir(), "%(title)s.%(ext)s")
 
             ydl_opts: dict[str, Any] = {
@@ -385,7 +451,7 @@ class Downloader:
                 "socket_timeout": 30,
                 "progress_hooks": [progress_hook],
                 "postprocessor_hooks": [postprocessor_hook],
-                "logger": _YDLLogger(),
+                "logger": _YDLLogger(log_callback=lambda msg: self.log(f"[Task #{task.id}] {msg}")),
                 "ignoreerrors": True,
                 "noprogress": True,
                 "quiet": True,
@@ -411,13 +477,35 @@ class Downloader:
                     break
 
                 try:
-                    with SanitizedYoutubeDL(ydl_opts) as ydl:
+                    with SanitizedYoutubeDL(ydl_opts, metadata_callback=metadata_cb) as ydl:
+                        self.log(f"[Task #{task.id}] Starting extraction & download for {task.url}")
                         ydl.download([task.url])
 
                     with self._lock:
                         if not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
                             task.status = "COMPLETED"
                             task.percent = 100.0
+                            self.log(f"[Task #{task.id}] [SUCCESS] Download finished: {task.title}")
+                            target_dir = task.save_dir or get_default_download_dir()
+                            try:
+                                tracker_file = record_download_history(
+                                    {
+                                        "status": "COMPLETED",
+                                        "clean_title": task.title,
+                                        "filename": task.filename,
+                                        "raw_title": task.raw_title or task.title,
+                                        "description": task.description,
+                                        "url": task.url,
+                                        "size": task.total_bytes,
+                                        "duration": task.duration_str,
+                                        "format": task.format_str,
+                                        "file_path": os.path.join(target_dir, task.filename) if task.filename else "",
+                                    },
+                                    save_dir=target_dir,
+                                )
+                                self.log(f"[Task #{task.id}] [TRACKER] Logged metadata to Excel tracker: {tracker_file}")
+                            except Exception as te:
+                                self.log(f"[Task #{task.id}] [TRACKER ERROR] Failed to write Excel tracker: {te}")
                         else:
                             task.status = "PAUSED"
                     break
@@ -425,17 +513,20 @@ class Downloader:
                 except yt_dlp.utils.DownloadCancelled:
                     with self._lock:
                         task.status = "PAUSED"
+                        self.log(f"[Task #{task.id}] Download paused.")
                     break
                 except Exception as e:
                     if attempt < max_auto_retries and not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
                         with self._lock:
                             task.status = f"AUTO-RESUMING ({attempt}/{max_auto_retries})..."
+                        self.log(f"[Task #{task.id}] Connection interrupted. Auto-resuming ({attempt}/{max_auto_retries})...")
                         time.sleep(2)
                         continue
                     else:
                         with self._lock:
                             task.status = "ERROR"
                             task.error_message = str(e)
+                        self.log(f"[Task #{task.id}] [ERROR] {e}")
 
         workers_count = max(1, min(max_parallel, len(tasks_to_run)))
         with ThreadPoolExecutor(max_workers=workers_count) as executor:
