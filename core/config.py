@@ -51,6 +51,19 @@ def find_ffmpeg() -> str | None:
     if path:
         return path
 
+    # Check current working directory, executable dir, and app root
+    current_dir = os.getcwd()
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_candidates = [
+        os.path.join(current_dir, "ffmpeg.exe"),
+        os.path.join(app_dir, "ffmpeg.exe"),
+        os.path.join(current_dir, "_internal", "ffmpeg.exe"),
+        os.path.join(app_dir, "_internal", "ffmpeg.exe"),
+    ]
+    for c in local_candidates:
+        if os.path.isfile(c):
+            return c
+
     # Check common Windows install locations and existing software
     common_dirs = [
         os.path.join(os.environ.get("ProgramFiles", ""), "Softdeluxe", "Free Download Manager"),
