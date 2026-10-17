@@ -1,0 +1,29 @@
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Build outputs
+build/
+dist/
+*.exe
+
+# Downloaded media files
+*.mp4
+*.mkv
+*.webm
+*.mp3
+*.m4a
+*.part
+*.ytdl
+
+# IDE / System
+.vscode/
+.idea/
+Thumbs.db
