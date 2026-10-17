@@ -24,7 +24,12 @@ dist/
 *.part
 *.ytdl
 
+# Secrets & Environment
+.env
+*.zip
+
 # IDE / System
 .vscode/
 .idea/
 Thumbs.db
+

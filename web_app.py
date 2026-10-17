@@ -19,7 +19,7 @@ from flask import Flask, jsonify, render_template_string, request
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.config import QUALITY_OPTIONS, find_ffmpeg, get_default_download_dir
+from core.config import APP_VERSION, QUALITY_OPTIONS, find_ffmpeg, get_default_download_dir
 from core.downloader import Downloader
 from core.title_sanitizer import sanitize_title
 
@@ -262,6 +262,7 @@ HTML_TEMPLATE = """
                     <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 </span>
                 <span>All Video Downloader Pro</span>
+                <span style="font-size: 10px; color: #555555; background: #e0e0e0; padding: 1px 5px; border-radius: 2px; font-weight: normal;">v{{ app_version }}</span>
             </div>
             <div style="font-size: 11px; color: #777777;">4x Parallel Download Engine</div>
         </div>
@@ -314,6 +315,11 @@ HTML_TEMPLATE = """
         <button class="tb-button" onclick="openLogsDialog()" title="View live engine and download execution logs">
             <svg viewBox="0 0 24 24" fill="#555555"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
             <span>Live Logs</span>
+        </button>
+        <div class="tb-separator"></div>
+        <button class="tb-button" onclick="openUpdateDialog()" title="Check for software updates and update video extraction algorithms">
+            <svg viewBox="0 0 24 24" fill="#0066cc"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+            <span>Check Updates</span>
         </button>
     </div>
 
@@ -440,6 +446,43 @@ HTML_TEMPLATE = """
             <button class="win-btn" onclick="fetchLogs()">Refresh</button>
             <button class="win-btn" onclick="navigator.clipboard.writeText(document.getElementById('logs-textarea').value); alert('Logs copied to clipboard!');">Copy Logs</button>
             <button class="win-btn primary" onclick="closeLogsDialog()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Software & Extractor Updates Modal Dialog -->
+<div class="win-modal-backdrop" id="update-modal">
+    <div class="win-modal-box" style="width: 620px; max-width: 95vw;">
+        <div class="win-modal-header">
+            <span>All Video Downloader Pro - Software & Extractor Updates</span>
+            <span style="cursor: pointer; font-size: 14px;" onclick="closeUpdateDialog()">✕</span>
+        </div>
+        <div class="win-modal-body" style="gap: 14px;">
+            <div style="background: #f8fafc; border: 1px solid #d0d7de; border-radius: 4px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 13px; font-weight: 600; color: #1e293b;">Application Version</div>
+                        <div style="font-size: 11px; color: #64748b;">Installed: <strong>v{{ app_version }}</strong> &bull; Remote: GitHub Releases</div>
+                    </div>
+                    <button class="win-btn" id="btn-check-app-update" onclick="checkAppUpdates()">Check Now</button>
+                </div>
+                <div id="update-check-result" style="font-size: 11px; color: #334155; padding: 8px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 3px; display: none;">
+                </div>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px solid #d0d7de; border-radius: 4px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 13px; font-weight: 600; color: #1e293b;">Video Extractor Algorithms (yt-dlp)</div>
+                        <div style="font-size: 11px; color: #64748b;">Dynamically update Facebook, YouTube & Instagram scrapers without reinstalling</div>
+                    </div>
+                    <button class="win-btn primary" id="btn-update-engine" onclick="updateExtractorEngine()">Update Extractor</button>
+                </div>
+                <div id="engine-update-result" style="font-size: 11px; color: #0e8a16; display: none;"></div>
+            </div>
+        </div>
+        <div class="win-modal-footer">
+            <button class="win-btn primary" onclick="closeUpdateDialog()">Close</button>
         </div>
     </div>
 </div>
@@ -775,6 +818,91 @@ HTML_TEMPLATE = """
         pollStatusOnce();
     }
 
+    /* Auto-Updater JS Functions */
+    function openUpdateDialog() {
+        document.getElementById('update-modal').style.display = 'flex';
+        checkAppUpdates();
+    }
+
+    function closeUpdateDialog() {
+        document.getElementById('update-modal').style.display = 'none';
+    }
+
+    async function checkAppUpdates() {
+        const btn = document.getElementById('btn-check-app-update');
+        const resBox = document.getElementById('update-check-result');
+        btn.disabled = true;
+        resBox.style.display = 'block';
+        resBox.innerHTML = '<span style="color: #64748b;">Checking GitHub for updates...</span>';
+        try {
+            const resp = await fetch('/api/check_update');
+            const data = await resp.json();
+            btn.disabled = false;
+            if (data.has_update) {
+                resBox.innerHTML = `
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <div style="font-weight:600; color:#0e8a16;">🚀 New Version Available: v${data.latest_version}</div>
+                        <div style="color:#555; font-size:11px;"><strong>Release Notes:</strong> ${data.release_notes || 'Bug fixes and performance improvements.'}</div>
+                        <button class="win-btn primary" style="align-self:flex-start; margin-top:4px;" onclick="applyUpdate('${data.download_url}')">Update Now (Auto-Restart)</button>
+                    </div>
+                `;
+            } else if (data.error) {
+                resBox.innerHTML = `<span style="color: #b25900;">Notice: ${data.error}</span>`;
+            } else {
+                resBox.innerHTML = `<span style="color: #0e8a16;">✓ You are running the latest version (v${data.current_version}). No update needed.</span>`;
+            }
+        } catch (e) {
+            btn.disabled = false;
+            resBox.innerHTML = `<span style="color: #cc0000;">Failed to check updates: ${e}</span>`;
+        }
+    }
+
+    async function applyUpdate(url) {
+        if (!confirm('This will download the latest update package, replace the app files in-place, and restart the app. Continue?')) return;
+        const resBox = document.getElementById('update-check-result');
+        resBox.innerHTML = '<span style="color: #0066cc;">Downloading update package and applying in-place... App will restart in a few seconds.</span>';
+        try {
+            const resp = await fetch('/api/apply_update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({download_url: url})
+            });
+            const data = await resp.json();
+            if (data.success) {
+                resBox.innerHTML = `<span style="color: #0e8a16;">${data.message}</span>`;
+            } else {
+                alert('Update failed: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            resBox.innerHTML = '<span style="color: #0e8a16;">App is restarting with the new version...</span>';
+        }
+    }
+
+    async function updateExtractorEngine() {
+        const btn = document.getElementById('btn-update-engine');
+        const resBox = document.getElementById('engine-update-result');
+        btn.disabled = true;
+        resBox.style.display = 'block';
+        resBox.style.color = '#0066cc';
+        resBox.innerText = 'Updating video extraction algorithms...';
+        try {
+            const resp = await fetch('/api/update_engine', {method: 'POST'});
+            const data = await resp.json();
+            btn.disabled = false;
+            if (data.success) {
+                resBox.style.color = '#0e8a16';
+                resBox.innerText = '✓ Extractor algorithms updated successfully! Ready to download.';
+            } else {
+                resBox.style.color = '#b25900';
+                resBox.innerText = 'Notice: ' + (data.error || 'Already latest version.');
+            }
+        } catch (e) {
+            btn.disabled = false;
+            resBox.style.color = '#cc0000';
+            resBox.innerText = 'Error: ' + e;
+        }
+    }
+
     // Start auto polling as soon as DOM loads
     window.addEventListener('DOMContentLoaded', startPolling);
 </script>
@@ -788,7 +916,9 @@ def index():
     return render_template_string(
         HTML_TEMPLATE,
         default_dir=get_default_download_dir(),
+        app_version=APP_VERSION,
     )
+
 
 
 @app.route("/api/download", methods=["POST"])
@@ -923,6 +1053,30 @@ def sync_cloud_endpoint():
     from core.history_tracker import sync_tracker_to_cloud
     res = sync_tracker_to_cloud(log_callback=downloader.log)
     return jsonify(res)
+
+
+@app.route("/api/check_update")
+def check_update_endpoint():
+    from core.updater import check_for_app_updates
+    res = check_for_app_updates()
+    return jsonify(res)
+
+
+@app.route("/api/apply_update", methods=["POST"])
+def apply_update_endpoint():
+    data = request.get_json() or {}
+    download_url = data.get("download_url", "")
+    from core.updater import download_and_apply_update
+    res = download_and_apply_update(download_url, log_callback=downloader.log)
+    return jsonify(res)
+
+
+@app.route("/api/update_engine", methods=["POST"])
+def update_engine_endpoint():
+    from core.updater import update_extractor_engine
+    res = update_extractor_engine(log_callback=downloader.log)
+    return jsonify(res)
+
 
 
 if __name__ == "__main__":
