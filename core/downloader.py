@@ -26,6 +26,29 @@ from core.config import DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_d
 from core.history_tracker import get_tracker_path, record_download_history
 from core.title_sanitizer import sanitize_title
 
+import sys
+if sys.platform == "win32":
+    import ctypes
+
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+    ES_AWAYMODE_REQUIRED = 0x00000040
+
+    def _set_sleep_prevention(enable: bool) -> None:
+        """Prevent Windows from sleeping while downloads are running."""
+        try:
+            if enable:
+                ctypes.windll.kernel32.SetThreadExecutionState(
+                    ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+                )
+            else:
+                ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+        except Exception:
+            pass
+else:
+    def _set_sleep_prevention(enable: bool) -> None:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Individual Task Progress Structure
@@ -303,6 +326,8 @@ class Downloader:
     def pause_all(self) -> None:
         """Pause all currently running/queued downloads."""
         self._cancel_event.set()
+        _set_sleep_prevention(False)
+        self.log("[POWER] Downloads paused. Normal laptop sleep mode restored.")
         with self._lock:
             for task in self.tasks:
                 self._paused_task_ids.add(task.id)
@@ -328,6 +353,7 @@ class Downloader:
     def clear_all(self) -> None:
         """Clear all tasks."""
         self.pause_all()
+        _set_sleep_prevention(False)
         with self._lock:
             self._paused_task_ids.clear()
             self.tasks = []
@@ -351,6 +377,7 @@ class Downloader:
 
             return {
                 "is_busy": self._is_running,
+                "sleep_prevented": self._is_running,
                 "total": total,
                 "completed": completed,
                 "errors": errors,
@@ -363,6 +390,8 @@ class Downloader:
 
     def _start_pool_on_tasks(self, tasks_to_run: list[TaskProgress], max_parallel: int) -> None:
         self._cancel_event.clear()
+        _set_sleep_prevention(True)
+        self.log("[POWER] Active download started. Laptop sleep prevention enabled.")
         with self._lock:
             for t in tasks_to_run:
                 self._paused_task_ids.discard(t.id)
@@ -540,3 +569,6 @@ class Downloader:
             # Check if any tasks are still running
             any_active = any(t.status in ("CONNECTING", "DOWNLOADING", "POST_PROCESSING") for t in self.tasks)
             self._is_running = any_active
+            if not any_active:
+                _set_sleep_prevention(False)
+                self.log("[POWER] All downloads completed. Normal laptop sleep mode restored.")

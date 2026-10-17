@@ -372,6 +372,7 @@ HTML_TEMPLATE = """
     <div class="app-statusbar">
         <div class="sb-pane" id="sb-status-text">Ready</div>
         <div class="sb-pane" id="sb-counts-text">0 downloads: 0 processing</div>
+        <div class="sb-pane" id="sb-power-text" style="color: #0e8a16;" title="Laptop sleep is automatically prevented while downloads are actively running">⚡ Laptop Sleep: Normal</div>
         <div class="sb-pane flex">Save location: {{ default_dir }}</div>
         <div class="sb-pane right" id="sb-speed-text">Speed: 0.00 KB/s</div>
     </div>
@@ -536,6 +537,12 @@ HTML_TEMPLATE = """
                 }
             });
             document.getElementById('sb-speed-text').innerText = `Speed: ${totalSpeedKB.toFixed(2)} KB/s`;
+
+            const powerEl = document.getElementById('sb-power-text');
+            if (powerEl) {
+                powerEl.innerText = data.is_busy ? '⚡ Laptop Sleep: Prevented (Awake)' : 'Laptop Sleep: Normal';
+                powerEl.style.color = data.is_busy ? '#b25900' : '#0e8a16';
+            }
 
             const hasUnfinished = taskList.some(t => ['PAUSED', 'CANCELLED', 'ERROR', 'QUEUED'].includes(t.status));
             document.getElementById('btn-start-all').disabled = !hasUnfinished;
