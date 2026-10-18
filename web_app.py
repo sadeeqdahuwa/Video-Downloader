@@ -810,7 +810,10 @@ HTML_TEMPLATE = """
             }
         }
 
+        let isPolling = false;
         async function pollStatusOnce() {
+            if (isPolling) return;
+            isPolling = true;
             try {
                 const resp = await fetch('/api/status');
                 const data = await resp.json();
@@ -861,13 +864,16 @@ HTML_TEMPLATE = """
                 document.getElementById('footer-summary-counts').innerText = `${data.total} downloads: ${data.completed} finished, ${data.active} running`;
 
                 renderTasks(taskList);
-            } catch (err) {}
+            } catch (err) {
+            } finally {
+                isPolling = false;
+            }
         }
 
         function startPolling() {
             if (pollInterval) clearInterval(pollInterval);
             pollStatusOnce();
-            pollInterval = setInterval(pollStatusOnce, 800);
+            pollInterval = setInterval(pollStatusOnce, 1200);
         }
 
         function renderTasks(tasks) {
@@ -895,8 +901,20 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            container.innerHTML = '';
+            const emptyHolder = container.querySelector('.empty-holder');
+            if (emptyHolder) emptyHolder.remove();
+
+            const activeIds = new Set(filtered.map(t => String(t.id)));
+            const existingCards = container.querySelectorAll('.task-card');
+            existingCards.forEach(card => {
+                const cardId = card.getAttribute('data-task-id');
+                if (!activeIds.has(cardId)) {
+                    card.remove();
+                }
+            });
+
             filtered.forEach(task => {
+                let card = document.getElementById(`task-card-${task.id}`);
                 const isAudio = task.title.toLowerCase().endsWith('.mp3') || (task.format_str && task.format_str.includes('audio') && !task.format_str.includes('video'));
                 const badgeFormat = isAudio ? 'MP3' : 'HD';
                 const platform = detectPlatform(task.url);
@@ -938,42 +956,93 @@ HTML_TEMPLATE = """
                     actionHtml = `<button class="task-action-btn btn-folder" onclick="openFolder('${safeDir}')">📂 Open Folder</button>`;
                 }
 
-                const card = document.createElement('div');
-                card.className = cardClass;
-                card.innerHTML = `
-                    <!-- Thumbnail Box -->
-                    <div class="thumb-box">
-                        <svg class="bg-play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        <span class="badge-format">${badgeFormat}</span>
-                        <span class="badge-platform ${platform.cls}">${platform.name}</span>
-                    </div>
-
-                    <!-- Task Center Info -->
-                    <div class="task-center">
-                        <div class="title-row">
-                            <span class="video-title" title="${safeTitle}">${safeTitle}</span>
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = `task-card-${task.id}`;
+                    card.setAttribute('data-task-id', String(task.id));
+                    card.className = cardClass;
+                    card.innerHTML = `
+                        <!-- Thumbnail Box -->
+                        <div class="thumb-box">
+                            <svg class="bg-play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                            <span class="badge-format">${badgeFormat}</span>
+                            <span class="badge-platform ${platform.cls}">${platform.name}</span>
                         </div>
-                        <div class="video-source-url" onclick="window.open('${safeUrl}', '_blank')" title="${safeUrl}">
-                            ${safeUrl}
-                        </div>
-                        <div class="meta-stat-row">
-                            <span class="stat-badge-status ${statusClass}">${statusLabel}</span>
-                            ${task.speed && task.speed !== '—' ? `<span class="stat-item active-speed">↓ ${task.speed}</span>` : ''}
-                            ${task.eta && task.eta !== '—' ? `<span class="stat-item">ETA: ${task.eta}</span>` : ''}
-                            <span class="stat-item">${escapeHtml(sizeDisplay)}</span>
-                        </div>
-                    </div>
 
-                    <!-- Actions -->
-                    <div class="task-actions-col">
-                        ${actionHtml}
-                        <button class="task-action-btn btn-remove" title="Remove" onclick="removeTask(${task.id})">✕</button>
-                    </div>
+                        <!-- Task Center Info -->
+                        <div class="task-center">
+                            <div class="title-row">
+                                <span class="video-title" title="${safeTitle}">${safeTitle}</span>
+                            </div>
+                            <div class="video-source-url" onclick="window.open('${safeUrl}', '_blank')" title="${safeUrl}">
+                                ${safeUrl}
+                            </div>
+                            <div class="meta-stat-row">
+                                <span class="stat-badge-status ${statusClass}">${statusLabel}</span>
+                                <span class="stat-item active-speed" style="${task.speed && task.speed !== '—' ? '' : 'display:none;'}">↓ ${task.speed || ''}</span>
+                                <span class="stat-item eta-item" style="${task.eta && task.eta !== '—' ? '' : 'display:none;'}">ETA: ${task.eta || ''}</span>
+                                <span class="stat-item size-item">${escapeHtml(sizeDisplay)}</span>
+                            </div>
+                        </div>
 
-                    <!-- Progress Underline -->
-                    <div class="card-progress-bar ${task.status === 'COMPLETED' ? 'completed' : ''}" style="width: ${task.percent}%;"></div>
-                `;
-                container.appendChild(card);
+                        <!-- Actions -->
+                        <div class="task-actions-col">
+                            <div class="action-btn-wrap">${actionHtml}</div>
+                            <button class="task-action-btn btn-remove" title="Remove" onclick="removeTask(${task.id})">✕</button>
+                        </div>
+
+                        <!-- Progress Underline -->
+                        <div class="card-progress-bar ${task.status === 'COMPLETED' ? 'completed' : ''}" style="width: ${task.percent}%;"></div>
+                    `;
+                    container.appendChild(card);
+                } else {
+                    card.className = cardClass;
+                    const titleEl = card.querySelector('.video-title');
+                    if (titleEl && titleEl.innerText !== task.title) {
+                        titleEl.innerText = task.title;
+                        titleEl.title = task.title;
+                    }
+
+                    const statusBadge = card.querySelector('.stat-badge-status');
+                    if (statusBadge) {
+                        statusBadge.className = `stat-badge-status ${statusClass}`;
+                        statusBadge.innerText = statusLabel;
+                    }
+
+                    const speedEl = card.querySelector('.active-speed');
+                    if (speedEl) {
+                        if (task.speed && task.speed !== '—') {
+                            speedEl.style.display = '';
+                            speedEl.innerText = `↓ ${task.speed}`;
+                        } else {
+                            speedEl.style.display = 'none';
+                        }
+                    }
+
+                    const etaEl = card.querySelector('.eta-item');
+                    if (etaEl) {
+                        if (task.eta && task.eta !== '—') {
+                            etaEl.style.display = '';
+                            etaEl.innerText = `ETA: ${task.eta}`;
+                        } else {
+                            etaEl.style.display = 'none';
+                        }
+                    }
+
+                    const sizeEl = card.querySelector('.size-item');
+                    if (sizeEl) sizeEl.innerText = sizeDisplay;
+
+                    const barEl = card.querySelector('.card-progress-bar');
+                    if (barEl) {
+                        barEl.className = `card-progress-bar ${task.status === 'COMPLETED' ? 'completed' : ''}`;
+                        barEl.style.width = `${task.percent}%`;
+                    }
+
+                    const actionWrap = card.querySelector('.action-btn-wrap');
+                    if (actionWrap && actionWrap.innerHTML !== actionHtml) {
+                        actionWrap.innerHTML = actionHtml;
+                    }
+                }
             });
         }
 
@@ -1414,10 +1483,20 @@ if __name__ == "__main__":
     log.setLevel(logging.ERROR)
 
     server_thread = threading.Thread(
-        target=lambda: app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False),
+        target=lambda: app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True),
         daemon=True,
     )
     server_thread.start()
+
+    # Ensure Flask server is fully initialized and responding before creating window
+    import urllib.request
+    for _ in range(50):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=0.3) as r:
+                if r.status == 200:
+                    break
+        except Exception:
+            time.sleep(0.05)
 
     # Prefer Native Desktop Window
     use_browser = "--browser" in sys.argv
@@ -1442,6 +1521,6 @@ if __name__ == "__main__":
             print(f"[StreamVault Pro] Native window unavailable ({e}), falling back to browser.")
 
     if not opened_native:
-        time.sleep(0.8)
+        time.sleep(0.5)
         webbrowser.open(f"http://127.0.0.1:{port}")
         server_thread.join()
