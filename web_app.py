@@ -1253,16 +1253,58 @@ def update_engine_endpoint():
 
 
 if __name__ == "__main__":
+    import sys
     import threading
     import time
+    import socket
     import webbrowser
 
+    def _find_free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
     port = 5000
-    print(f"Starting {APP_NAME} UI on http://127.0.0.1:{port}")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))
+    except OSError:
+        port = _find_free_port()
 
-    def _open_browser():
-        time.sleep(1.0)
+    # Suppress werkzeug logging for desktop cleanliness
+    import logging
+    log = logging.getLogger("werkzeug")
+    log.setLevel(logging.ERROR)
+
+    server_thread = threading.Thread(
+        target=lambda: app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False),
+        daemon=True,
+    )
+    server_thread.start()
+
+    # Prefer Native Desktop Window
+    use_browser = "--browser" in sys.argv
+    opened_native = False
+
+    if not use_browser:
+        try:
+            import webview
+
+            window = webview.create_window(
+                title=f"{APP_NAME}",
+                url=f"http://127.0.0.1:{port}",
+                width=1240,
+                height=840,
+                min_size=(960, 600),
+                background_color="#0A0E17",
+            )
+            opened_native = True
+            webview.start()
+            sys.exit(0)
+        except Exception as e:
+            print(f"[StreamVault Pro] Native window unavailable ({e}), falling back to browser.")
+
+    if not opened_native:
+        time.sleep(0.8)
         webbrowser.open(f"http://127.0.0.1:{port}")
-
-    threading.Thread(target=_open_browser, daemon=True).start()
-    app.run(host="127.0.0.1", port=port, debug=False)
+        server_thread.join()

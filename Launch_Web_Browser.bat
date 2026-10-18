@@ -1,7 +1,6 @@
 @echo off
-title StreamVault Pro
+title StreamVault Pro (Browser Mode)
 cd /d "%~dp0"
-echo Starting StreamVault Pro Dashboard...
-start http://127.0.0.1:5000
-.venv\Scripts\python.exe web_app.py
+echo Starting StreamVault Pro in Browser Mode...
+.venv\Scripts\python.exe web_app.py --browser
 pause

@@ -29,17 +29,18 @@ A high-performance multi-source video and audio downloader desktop application w
 
 ## 🚀 Quick Start
 
-### 1. Launch Application
+### 1. Launch Desktop Application
 Double-click:
 ```bat
-Launch_Web_Browser.bat
+Launch_Desktop_App.bat
 ```
 Or run directly from terminal:
 ```bash
-python web_app.py
+python run_app.py
 ```
-Then open your browser at:
-`http://127.0.0.1:5000`
+This launches **StreamVault Pro** directly in a **native standalone desktop window** (no browser needed).
+
+*Tip: If you prefer using your regular web browser, run `Launch_Web_Browser.bat` or `python web_app.py --browser`.*
 
 ### 2. Build Standalone Portable `.exe`
 Double-click:

@@ -5,7 +5,7 @@ echo ========================================================
 echo  Building StreamVault Pro Standalone (.exe)
 echo ========================================================
 echo.
-.venv\Scripts\pyinstaller.exe --noconfirm --onedir --windowed --name "StreamVaultPro" --collect-all yt_dlp --collect-all openpyxl --collect-all et_xmlfile --add-data "core;core" web_app.py
+.venv\Scripts\pyinstaller.exe --noconfirm --onedir --windowed --name "StreamVaultPro" --collect-all yt_dlp --collect-all openpyxl --collect-all et_xmlfile --collect-all pywebview --collect-all clr_loader --collect-all pythonnet --add-data "core;core" web_app.py
 
 if %ERRORLEVEL% EQU 0 (
     if exist "ffmpeg.exe" (
