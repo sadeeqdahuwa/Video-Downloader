@@ -22,7 +22,7 @@ from typing import Any, Callable
 import yt_dlp
 
 import datetime
-from core.config import DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir
+from core.config import APP_NAME, DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir
 from core.history_tracker import get_tracker_path, record_download_history
 from core.title_sanitizer import sanitize_title
 
@@ -215,7 +215,7 @@ class Downloader:
         self._manager_thread: threading.Thread | None = None
         self._is_running = False
         self._next_id = 1
-        self.log("All Video Downloader Pro engine initialized (4x parallel mode).")
+        self.log(f"{APP_NAME} engine initialized (4x parallel mode).")
 
     def log(self, msg: str) -> None:
         """Record a timestamped log line to memory, stdout, and downloader.log file."""

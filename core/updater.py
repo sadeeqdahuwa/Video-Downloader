@@ -155,6 +155,7 @@ def download_and_apply_update(
         # Check if the extracted directory has a nested root folder
         source_dir = extracted_dir
         nested_candidates = [
+            os.path.join(extracted_dir, "StreamVaultPro"),
             os.path.join(extracted_dir, "AllVideoDownloaderPro"),
             os.path.join(extracted_dir, "Video-Downloader"),
         ]

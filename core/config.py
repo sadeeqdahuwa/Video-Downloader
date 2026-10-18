@@ -104,5 +104,6 @@ def find_ffmpeg() -> str | None:
 # ---------------------------------------------------------------------------
 # App metadata
 # ---------------------------------------------------------------------------
-APP_NAME = "Video Downloader"
+APP_NAME = "StreamVault Pro"
+APP_TAGLINE = "High-Performance Multi-Source Video Downloader & Archiver"
 APP_VERSION = "1.0.0"
