@@ -1,14 +1,14 @@
 """
-StreamVault Pro - High-Performance Multi-Source Video Downloader
-================================================================
-Modern, high-performance video and audio downloader desktop interface:
-  - Clean, modern dark glass / slate aesthetic
-  - Direct quick-paste hero bar with multi-line batch expansion
-  - Automatic title cleaning & Facebook view/reaction metrics stripping
-  - 4x parallel multi-threaded download engine with auto-resume
-  - Automatic Excel (.xlsx) and CSV download history logging
-  - Live laptop sleep prevention during downloads
-  - In-app 1-click updates and dynamic video extractor updates
+StreamVault Pro - Kotato-Style High-Performance Video Downloader & Archiver
+==========================================================================
+Faithful, modern desktop replica of the classic All Video Downloader Pro (Kotato):
+  - Top Tabs: Download, Tasks, Convert, History
+  - Action Toolbar: Paste Link, Start All, Pause All, Remove Completed, Clear All, Open Folder, Excel Tracker, Cloud Sync, Logs, Updates
+  - Left Filter Sidebar: All, Processing, Paused, Completed, Failed with live counts
+  - Kotato Data Grid: Thumbnail, Source URL, Clean Title, Quality, Duration, Size, Status & Speed
+  - Bulletproof multi-link paste: automatically splits 1 or 200+ links onto their own lines with \n
+  - High-performance in-place DOM updates: silky smooth even with 500+ tasks
+  - Embedded application icon & Windows PE metadata
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_file
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,1250 +36,1058 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }} - {{ app_tagline }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <style>
         :root {
-            --bg-base: #0a0e17;
-            --bg-surface: #111827;
-            --bg-card: #182234;
-            --bg-card-hover: #1f2d44;
-            --bg-input: #0d131f;
-            --border-subtle: #243247;
-            --border-highlight: #3b82f6;
-            
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            
-            --success: #10b981;
-            --success-surface: rgba(16, 185, 129, 0.12);
-            --amber: #f59e0b;
-            --amber-surface: rgba(245, 158, 11, 0.12);
-            --danger: #ef4444;
-            --danger-surface: rgba(239, 68, 68, 0.12);
-            --info: #06b6d4;
-            
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --text-sub: #64748b;
+            --win-bg: #f0f2f5;
+            --win-header: #e4e6eb;
+            --win-border: #cbd5e1;
+            --win-text: #0f172a;
+            --win-text-sub: #64748b;
+            --win-card: #ffffff;
+            --win-hover: #f1f5f9;
+            --win-active: #e2e8f0;
+            --accent-blue: #2563eb;
+            --accent-green: #16a34a;
+            --accent-amber: #d97706;
+            --accent-red: #dc2626;
+            --grid-line: #e2e8f0;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: var(--bg-base); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Tahoma, sans-serif; }
+        body { background: #dcdfe4; color: var(--win-text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; font-size: 12px; }
 
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: var(--bg-base); }
-        ::-webkit-scrollbar-thumb { background: #2d3d54; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3b506e; }
-
-        /* Top Header Navbar */
-        .header-bar {
-            height: 56px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle);
-            display: flex; align-items: center; justify-content: space-between; padding: 0 18px; flex-shrink: 0;
-        }
-        .brand-cluster { display: flex; align-items: center; gap: 12px; }
-        .brand-icon-box {
-            width: 34px; height: 34px; border-radius: 9px; background: var(--primary-gradient);
-            display: flex; align-items: center; justify-content: center; color: white;
-            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35); flex-shrink: 0;
-        }
-        .brand-icon-box svg { width: 18px; height: 18px; fill: currentColor; }
-        .brand-name { font-size: 15px; font-weight: 800; letter-spacing: -0.3px; color: #ffffff; }
-        .version-badge {
-            font-size: 10px; font-weight: 700; color: #38bdf8; background: rgba(56, 189, 248, 0.12);
-            padding: 2px 7px; border-radius: 12px; border: 1px solid rgba(56, 189, 248, 0.25);
+        /* Window Container */
+        .app-window {
+            background: #ffffff; width: 100%; height: 100%; display: flex; flex-direction: column;
+            border: 1px solid #94a3b8;
         }
 
-        .header-tools { display: flex; align-items: center; gap: 8px; }
-        .status-pill {
-            display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px;
-            background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 20px;
-            font-size: 11px; font-weight: 600; color: var(--text-muted);
+        /* Top Menu & Tab Strip */
+        .app-header {
+            background: #eef1f5; border-bottom: 1px solid var(--win-border); display: flex; flex-direction: column;
         }
-        .pulse-dot {
-            width: 7px; height: 7px; border-radius: 50%; background: #64748b;
+        .app-menubar {
+            height: 30px; display: flex; align-items: center; justify-content: space-between;
+            padding: 0 10px; border-bottom: 1px solid #dfe3ea; font-size: 12px; color: #1e293b;
         }
-        .pulse-dot.active {
-            background: var(--success); box-shadow: 0 0 10px var(--success);
-            animation: pulse-glow 1.6s infinite ease-in-out;
+        .app-title-tag { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+        .app-logo-badge {
+            width: 18px; height: 18px; background: linear-gradient(135deg, #2563eb, #7c3aed);
+            border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white;
         }
-        @keyframes pulse-glow {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.3); opacity: 0.6; }
+        .app-logo-badge svg { width: 11px; height: 11px; fill: currentColor; }
+
+        .app-tabs {
+            height: 36px; display: flex; align-items: flex-end; padding: 0 8px; gap: 4px;
+        }
+        .tab-btn {
+            height: 32px; padding: 0 22px; font-size: 12px; font-weight: 500; color: #475569;
+            background: transparent; border: 1px solid transparent; border-bottom: none;
+            border-top-left-radius: 4px; border-top-right-radius: 4px; cursor: pointer;
+            display: flex; align-items: center; gap: 6px; transition: all 0.15s ease;
+        }
+        .tab-btn:hover { background: #e2e8f0; color: #0f172a; }
+        .tab-btn.active {
+            background: #ffffff; color: var(--accent-blue); font-weight: 700;
+            border-color: var(--win-border); border-bottom: 1px solid #ffffff; position: relative; bottom: -1px;
         }
 
-        .tool-btn {
-            display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
-            background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 7px;
-            color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer;
-            transition: all 0.18s ease;
+        /* Windows Action Toolstrip */
+        .app-toolbar {
+            background: #f8fafc; padding: 5px 10px; display: flex; align-items: center;
+            gap: 5px; border-bottom: 1px solid var(--win-border); flex-wrap: wrap;
         }
-        .tool-btn svg { width: 14px; height: 14px; fill: currentColor; }
-        .tool-btn:hover { background: var(--bg-card-hover); color: var(--text-main); border-color: #3e5270; }
-        .tool-btn.success { color: #34d399; border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.08); }
-        .tool-btn.success:hover { background: rgba(52, 211, 153, 0.16); color: #6ee7b7; border-color: #34d399; }
+        .tb-button {
+            display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+            height: 30px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px;
+            font-size: 12px; font-weight: 500; color: #1e293b; cursor: pointer; transition: all 0.15s ease;
+        }
+        .tb-button:hover { background: #f1f5f9; border-color: #94a3b8; }
+        .tb-button:active { background: #e2e8f0; }
+        .tb-button:disabled { opacity: 0.45; cursor: not-allowed; background: #f8fafc; border-color: #e2e8f0; }
+        
+        .tb-button svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .tb-button.highlight {
+            font-weight: 700; color: #15803d; border-color: #86efac; background: #f0fdf4;
+        }
+        .tb-button.highlight:hover { background: #dcfce7; border-color: #4ade80; }
+        .tb-separator { width: 1px; height: 20px; background: #cbd5e1; margin: 0 4px; }
 
-        /* Main Workspace */
-        .workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 16px 20px 0 20px; gap: 14px; }
+        /* Main Workspace Container */
+        .app-body { flex: 1; display: flex; overflow: hidden; background: #ffffff; position: relative; }
 
-        /* Hero Quick-Paste Download Card */
-        .quick-download-card {
-            background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 12px;
-            padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); flex-shrink: 0;
-        }
-        .input-row { display: flex; gap: 8px; align-items: center; }
-        .url-input-wrap {
-            flex: 1; position: relative; display: flex; align-items: center;
-        }
-        .url-input-wrap svg {
-            position: absolute; left: 12px; width: 16px; height: 16px; fill: var(--text-sub);
-        }
-        .url-input {
-            width: 100%; height: 42px; background: var(--bg-input); border: 1px solid var(--border-subtle);
-            border-radius: 8px; padding: 0 90px 0 38px; color: #ffffff; font-size: 13px; outline: none;
-            transition: border-color 0.18s ease, box-shadow 0.18s ease;
-        }
-        .url-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.25); }
-        .paste-btn-inside {
-            position: absolute; right: 8px; height: 26px; padding: 0 10px;
-            background: #1e293b; border: 1px solid #334155; border-radius: 5px; color: #38bdf8;
-            font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s ease;
-        }
-        .paste-btn-inside:hover { background: #334155; color: #7dd3fc; }
+        /* View Panels */
+        .view-panel { width: 100%; height: 100%; display: none; overflow: hidden; }
+        .view-panel.active { display: flex; }
 
-        .select-pill {
-            height: 42px; background: var(--bg-input); border: 1px solid var(--border-subtle);
-            border-radius: 8px; padding: 0 12px; color: var(--text-main); font-size: 12px;
-            font-weight: 600; outline: none; cursor: pointer;
+        /* --- DOWNLOAD COMPOSER VIEW --- */
+        .composer-view {
+            width: 100%; height: 100%; display: flex; flex-direction: column; padding: 20px 28px;
+            background: #f8fafc; overflow-y: auto;
         }
-        .select-pill:focus { border-color: var(--primary); }
-
-        .btn-download-primary {
-            height: 42px; padding: 0 20px; background: var(--primary-gradient); border: none;
-            border-radius: 8px; color: white; font-size: 13px; font-weight: 700; cursor: pointer;
-            display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
-            transition: all 0.18s ease; flex-shrink: 0;
+        .composer-card {
+            background: #ffffff; border: 1px solid var(--win-border); border-radius: 6px;
+            padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); max-width: 900px;
+            display: flex; flex-direction: column; gap: 16px;
         }
-        .btn-download-primary:hover { opacity: 0.95; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79, 70, 229, 0.5); }
-        .btn-download-primary:active { transform: translateY(0); }
-        .btn-download-primary svg { width: 16px; height: 16px; fill: currentColor; }
-
-        .btn-batch-toggle {
-            height: 42px; padding: 0 14px; background: var(--bg-card); border: 1px solid var(--border-subtle);
-            border-radius: 8px; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer;
-            display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease;
-        }
-        .btn-batch-toggle:hover { background: var(--bg-card-hover); color: var(--text-main); }
-
-        /* Batch Dropdown Drawer */
-        .batch-drawer {
-            display: none; flex-direction: column; gap: 8px; padding-top: 6px;
-            border-top: 1px dashed var(--border-subtle); margin-top: 2px;
-        }
-        .batch-textarea {
-            width: 100%; height: 95px; background: var(--bg-input); border: 1px solid var(--border-subtle);
-            border-radius: 8px; padding: 10px; color: #ffffff; font-family: "JetBrains Mono", monospace;
-            font-size: 12px; outline: none; resize: vertical; line-height: 1.45;
-        }
-        .batch-textarea:focus { border-color: var(--primary); }
-
-        .sub-bar-options {
-            display: flex; align-items: center; justify-content: space-between; font-size: 11px;
-            color: var(--text-sub); padding: 0 2px;
-        }
-        .path-indicator { display: flex; align-items: center; gap: 6px; max-width: 70%; }
-        .path-text { color: var(--text-muted); font-family: "JetBrains Mono", monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .text-action-link { color: #38bdf8; cursor: pointer; text-decoration: underline; margin-left: 4px; }
-
-        /* Filter & Controls Row */
-        .queue-header-row {
-            display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
-            padding-bottom: 2px;
-        }
-        .filter-tabs { display: flex; gap: 4px; }
-        .filter-tab-pill {
-            padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
-            color: var(--text-muted); cursor: pointer; border: 1px solid transparent; background: transparent;
-            display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease;
-        }
-        .filter-tab-pill:hover { background: var(--bg-card); color: var(--text-main); }
-        .filter-tab-pill.active {
-            background: var(--bg-card); color: #ffffff; border-color: var(--border-subtle);
-        }
-        .filter-count-badge {
-            background: rgba(255, 255, 255, 0.08); font-size: 10px; padding: 1px 6px;
-            border-radius: 10px; font-weight: 700;
-        }
-        .filter-tab-pill.active .filter-count-badge { background: var(--primary); color: white; }
-
-        .queue-actions { display: flex; align-items: center; gap: 6px; }
-        .btn-ctrl {
-            display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
-            border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none;
-            transition: all 0.15s ease;
-        }
-        .btn-ctrl svg { width: 13px; height: 13px; fill: currentColor; }
-        .btn-ctrl.start { background: var(--success-surface); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
-        .btn-ctrl.start:hover { background: rgba(16, 185, 129, 0.2); }
-        .btn-ctrl.pause { background: var(--amber-surface); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
-        .btn-ctrl.pause:hover { background: rgba(245, 158, 11, 0.2); }
-        .btn-ctrl.ghost { background: transparent; color: var(--text-sub); border: 1px solid transparent; }
-        .btn-ctrl.ghost:hover { background: var(--bg-card); color: var(--text-main); border-color: var(--border-subtle); }
-        .btn-ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
-
-        /* Task List Container */
-        .task-list-scroll {
-            flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
-            padding-bottom: 16px;
+        .composer-header-row { display: flex; justify-content: space-between; align-items: baseline; }
+        .composer-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+        .badge-count {
+            font-size: 12px; font-weight: 700; background: #dbeafe; color: #1d4ed8;
+            padding: 3px 10px; border-radius: 12px;
         }
 
-        /* Modern Video Download Card */
-        .task-card {
-            background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 10px;
-            padding: 12px 14px; display: flex; align-items: center; gap: 14px; position: relative;
-            transition: all 0.18s ease; overflow: hidden;
+        .composer-textarea {
+            width: 100%; height: 220px; padding: 12px 14px; border: 1px solid #cbd5e1;
+            border-radius: 4px; font-family: "Consolas", "JetBrains Mono", monospace;
+            font-size: 12px; line-height: 1.6; resize: vertical; outline: none;
+            background: #ffffff; color: #0f172a;
         }
-        .task-card:hover { border-color: #334460; background: var(--bg-card); }
-        .task-card.active-download { border-color: rgba(79, 70, 229, 0.4); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+        .composer-textarea:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
 
-        /* Bottom Progress Underline */
-        .card-progress-bar {
-            position: absolute; bottom: 0; left: 0; height: 3px; background: var(--primary-gradient);
-            transition: width 0.3s ease; border-radius: 0 2px 2px 0;
+        .composer-btn-bar { display: flex; justify-content: space-between; align-items: center; }
+        .action-group-left { display: flex; gap: 8px; }
+        .composer-btn {
+            height: 32px; padding: 0 14px; border: 1px solid #cbd5e1; border-radius: 4px;
+            background: #ffffff; font-size: 12px; font-weight: 600; color: #334155; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 6px;
         }
-        .card-progress-bar.completed { background: var(--success); }
+        .composer-btn:hover { background: #f1f5f9; border-color: #94a3b8; }
+        .composer-btn.danger:hover { background: #fee2e2; border-color: #f87171; color: #b91c1c; }
 
-        /* Video Thumbnail Box */
-        .thumb-box {
-            width: 90px; height: 54px; border-radius: 6px; background: #0f172a; position: relative;
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-            overflow: hidden; border: 1px solid #1e293b;
+        .composer-grid-settings {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 4px;
         }
-        .thumb-box svg.bg-play-icon { width: 22px; height: 22px; fill: #475569; }
-        .badge-format {
-            position: absolute; top: 3px; right: 3px; font-size: 9px; font-weight: 800;
-            padding: 1px 4px; border-radius: 3px; background: rgba(0, 0, 0, 0.75); color: #ffffff;
+        .setting-field { display: flex; flex-direction: column; gap: 6px; }
+        .setting-label { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; }
+        .setting-select, .setting-input {
+            height: 34px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 4px;
+            font-size: 12px; background: #ffffff; color: #0f172a; outline: none;
         }
-        .badge-platform {
-            position: absolute; bottom: 3px; left: 3px; font-size: 8px; font-weight: 800;
-            padding: 1px 4px; border-radius: 2px; text-transform: uppercase;
-        }
-        .badge-platform.facebook { background: #1877f2; color: white; }
-        .badge-platform.youtube { background: #ff0000; color: white; }
-        .badge-platform.tiktok { background: #00f2fe; color: black; }
-        .badge-platform.instagram { background: #e1306c; color: white; }
-        .badge-platform.generic { background: #475569; color: white; }
+        .setting-select:focus, .setting-input:focus { border-color: var(--accent-blue); }
 
-        /* Content Center */
-        .task-center { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-        .title-row { display: flex; align-items: baseline; gap: 8px; }
-        .video-title {
-            font-size: 13px; font-weight: 700; color: #f1f5f9; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis; max-width: 90%;
-        }
-        .video-source-url {
-            font-size: 11px; color: var(--text-sub); white-space: nowrap; overflow: hidden;
-            text-overflow: ellipsis; cursor: pointer; max-width: 75%;
-        }
-        .video-source-url:hover { color: #38bdf8; text-decoration: underline; }
+        .folder-row { display: flex; gap: 8px; }
+        .folder-row input { flex: 1; }
 
-        .meta-stat-row {
-            display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-muted);
-            margin-top: 2px;
+        .btn-download-hero {
+            height: 44px; background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            border: none; border-radius: 6px; color: #ffffff; font-size: 14px; font-weight: 700;
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            cursor: pointer; box-shadow: 0 2px 4px rgba(37,99,235,0.25); transition: all 0.15s ease;
+            margin-top: 8px;
         }
-        .stat-item { display: inline-flex; align-items: center; gap: 4px; }
-        .stat-item.active-speed { color: #38bdf8; font-weight: 600; font-family: "JetBrains Mono", monospace; }
-        .stat-badge-status {
-            padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700;
-            text-transform: uppercase; letter-spacing: 0.3px;
-        }
-        .stat-badge-status.downloading { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
-        .stat-badge-status.completed { background: var(--success-surface); color: var(--success); }
-        .stat-badge-status.paused { background: var(--amber-surface); color: var(--amber); }
-        .stat-badge-status.error { background: var(--danger-surface); color: var(--danger); }
-        .stat-badge-status.queued { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; }
+        .btn-download-hero:hover { background: linear-gradient(135deg, #1d4ed8, #1e40af); transform: translateY(-1px); }
+        .btn-download-hero:active { transform: translateY(0); }
+        .btn-download-hero svg { width: 18px; height: 18px; fill: currentColor; }
 
-        /* Task Actions Right */
-        .task-actions-col { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-        .task-action-btn {
-            height: 30px; padding: 0 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
-            cursor: pointer; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-subtle);
-            background: var(--bg-card); color: var(--text-muted); transition: all 0.15s ease;
-        }
-        .task-action-btn:hover { background: var(--bg-card-hover); color: var(--text-main); }
-        .task-action-btn.btn-folder { color: #10b981; border-color: rgba(16, 185, 129, 0.3); }
-        .task-action-btn.btn-folder:hover { background: rgba(16, 185, 129, 0.15); }
-        .task-action-btn.btn-remove { color: #ef4444; border: none; background: transparent; font-size: 14px; padding: 0 6px; }
-        .task-action-btn.btn-remove:hover { color: #f87171; background: rgba(239, 68, 68, 0.1); }
+        /* --- TASKS GRID VIEW (Kotato Style) --- */
+        .tasks-view { width: 100%; height: 100%; display: flex; }
 
-        /* Empty State */
-        .empty-holder {
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            height: 240px; color: var(--text-sub); gap: 10px; text-align: center;
-            border: 2px dashed #1e293b; border-radius: 12px; margin-top: 10px;
+        /* Left Filter Sidebar */
+        .app-sidebar {
+            width: 175px; background: #f8fafc; border-right: 1px solid var(--win-border);
+            padding: 10px 8px; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0;
         }
-        .empty-holder svg { width: 44px; height: 44px; fill: #334155; }
-        .empty-holder h4 { font-size: 14px; font-weight: 700; color: var(--text-muted); }
-        .empty-holder p { font-size: 12px; max-width: 380px; line-height: 1.45; }
+        .sb-category {
+            display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 4px;
+            font-size: 12px; color: #334155; cursor: pointer; border: 1px solid transparent;
+            transition: all 0.1s ease;
+        }
+        .sb-category:hover { background: #f1f5f9; color: #0f172a; }
+        .sb-category.active {
+            background: #2563eb; color: #ffffff; font-weight: 600;
+        }
+        .sb-category svg { width: 14px; height: 14px; flex-shrink: 0; fill: currentColor; }
+        .sb-count {
+            margin-left: auto; font-size: 11px; padding: 1px 6px; border-radius: 10px;
+            background: #e2e8f0; color: #475569; font-weight: 700;
+        }
+        .sb-category.active .sb-count { background: rgba(255,255,255,0.25); color: #ffffff; }
+
+        /* Main Data Grid */
+        .grid-container {
+            flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #ffffff;
+        }
+        .grid-header {
+            display: grid;
+            grid-template-columns: 46px 1fr 1.6fr 105px 75px 125px 230px 100px;
+            background: #f1f5f9; border-bottom: 1px solid var(--win-border);
+            font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;
+            letter-spacing: 0.5px; line-height: 32px; padding: 0 10px;
+        }
+        .grid-header > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .grid-body {
+            flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column;
+        }
+
+        .task-row {
+            display: grid;
+            grid-template-columns: 46px 1fr 1.6fr 105px 75px 125px 230px 100px;
+            padding: 8px 10px; border-bottom: 1px solid var(--grid-line);
+            align-items: center; font-size: 12px; transition: background 0.1s;
+        }
+        .task-row:hover { background: #f8fafc; }
+
+        .cell-thumb {
+            width: 32px; height: 28px; background: #e2e8f0; border-radius: 3px;
+            display: flex; align-items: center; justify-content: center; color: #64748b;
+        }
+        .cell-thumb svg { width: 16px; height: 16px; fill: currentColor; }
+
+        .cell-source {
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px;
+            font-family: monospace; font-size: 11px; color: #64748b;
+        }
+        .cell-title {
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px;
+            font-weight: 600; color: #0f172a;
+        }
+
+        .quality-pill {
+            display: inline-block; padding: 2px 7px; border-radius: 3px;
+            font-size: 10px; font-weight: 700; background: #f1f5f9; color: #475569;
+            border: 1px solid #cbd5e1; text-align: center;
+        }
+
+        .cell-duration { color: #64748b; font-size: 11px; }
+        .cell-size { font-size: 11px; color: #334155; }
+
+        /* Progress Cell */
+        .cell-progress { display: flex; flex-direction: column; gap: 4px; padding-right: 12px; }
+        .progress-bar-bg {
+            width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%; background: var(--accent-green); width: 0%; transition: width 0.2s ease;
+        }
+        .progress-meta {
+            display: flex; justify-content: space-between; font-size: 10.5px; color: #475569;
+        }
+        .status-badge {
+            font-weight: 700;
+        }
+        .status-badge.DOWNLOADING { color: var(--accent-blue); }
+        .status-badge.COMPLETED { color: var(--accent-green); }
+        .status-badge.ERROR { color: var(--accent-red); }
+        .status-badge.PAUSED { color: var(--accent-amber); }
+        .status-badge.QUEUED { color: #64748b; }
+
+        .cell-actions { display: flex; gap: 4px; }
+        .row-action-btn {
+            width: 26px; height: 26px; border: 1px solid #cbd5e1; border-radius: 3px;
+            background: #ffffff; color: #475569; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.1s;
+        }
+        .row-action-btn:hover { background: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
+        .row-action-btn svg { width: 13px; height: 13px; fill: currentColor; }
+
+        .grid-empty-state {
+            margin: auto; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 12px; color: #94a3b8; padding: 60px 0;
+        }
+        .grid-empty-state svg { width: 44px; height: 44px; fill: #cbd5e1; }
+        .grid-empty-state span { font-size: 13px; }
 
         /* Bottom Status Bar */
-        .footer-bar {
-            height: 28px; background: #0b0f19; border-top: 1px solid var(--border-subtle);
-            display: flex; align-items: center; justify-content: space-between; padding: 0 18px;
-            font-size: 11px; color: var(--text-sub); flex-shrink: 0;
+        .app-statusbar {
+            height: 26px; background: #f1f5f9; border-top: 1px solid var(--win-border);
+            display: flex; align-items: center; padding: 0 12px; font-size: 11px; color: #475569;
+            gap: 16px;
         }
-        .footer-status-text { color: var(--text-muted); }
+        .sb-status-item { display: flex; align-items: center; gap: 6px; }
+        .sb-status-item.right { margin-left: auto; font-weight: 600; color: #16a34a; }
 
-        /* Modern Glass Modal Dialogs */
-        .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px);
-            display: none; align-items: center; justify-content: center; z-index: 1000;
+        /* Modals */
+        .modal-backdrop {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: none;
+            align-items: center; justify-content: center; z-index: 1000;
         }
-        .modal-window {
-            background: var(--bg-surface); border: 1px solid #334155; border-radius: 12px;
-            width: 580px; max-width: 92vw; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
-            display: flex; flex-direction: column; overflow: hidden; animation: popIn 0.18s ease-out;
+        .modal-card {
+            background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px;
+            width: 640px; max-width: 95vw; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            display: flex; flex-direction: column; overflow: hidden;
         }
-        @keyframes popIn {
-            from { transform: scale(0.96); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
+        .modal-header {
+            background: #f1f5f9; padding: 10px 16px; border-bottom: 1px solid #cbd5e1;
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 13px; font-weight: 700; color: #0f172a;
         }
-        .modal-top {
-            padding: 14px 18px; border-bottom: 1px solid var(--border-subtle);
-            display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 700;
-        }
-        .modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-        .modal-bottom {
-            padding: 12px 18px; background: #0c121d; border-top: 1px solid var(--border-subtle);
+        .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; max-height: 75vh; overflow-y: auto; }
+        .modal-footer {
+            background: #f8fafc; padding: 10px 16px; border-top: 1px solid #cbd5e1;
             display: flex; justify-content: flex-end; gap: 8px;
         }
-        .close-icon-btn { cursor: pointer; color: var(--text-sub); font-size: 16px; font-weight: bold; }
-        .close-icon-btn:hover { color: white; }
     </style>
 </head>
 <body>
 
-    <!-- Header Navbar -->
-    <header class="header-bar">
-        <div class="brand-cluster">
-            <div class="brand-icon-box">
-                <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+<div class="app-window">
+    <!-- Header -->
+    <div class="app-header">
+        <div class="app-menubar">
+            <div class="app-title-tag">
+                <div class="app-logo-badge">
+                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+                </div>
+                <span>{{ app_name }}</span>
+                <span style="font-weight: 400; color: #64748b;">— {{ app_tagline }} (v{{ app_version }})</span>
             </div>
-            <div>
-                <span class="brand-name">{{ app_name }}</span>
-                <span class="version-badge">v{{ app_version }}</span>
+            <div style="font-size: 11px; color: #64748b;">
+                Bundled Portable Engine • Clean Title Filter Active
             </div>
         </div>
 
-        <div class="header-tools">
-            <div class="status-pill" id="power-status-pill">
-                <span class="pulse-dot" id="power-dot"></span>
-                <span id="power-status-text">Sleep: Normal</span>
-            </div>
+        <!-- Top Navigation Tabs (Kotato Style) -->
+        <div class="app-tabs">
+            <button class="tab-btn active" id="tab-download-btn" onclick="switchTab('download')">
+                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>Download</span>
+            </button>
+            <button class="tab-btn" id="tab-tasks-btn" onclick="switchTab('tasks')">
+                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+                <span>Tasks (<span id="tab-task-count">0</span>)</span>
+            </button>
+            <button class="tab-btn" id="tab-convert-btn" onclick="switchTab('convert')">
+                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                <span>Convert</span>
+            </button>
+            <button class="tab-btn" id="tab-history-btn" onclick="switchTab('history')">
+                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                <span>History</span>
+            </button>
+        </div>
 
-            <div class="status-pill" style="font-family: 'JetBrains Mono', monospace; color: #38bdf8;">
-                <span id="sb-total-speed">↓ 0.00 KB/s</span>
-            </div>
-
-            <button class="tool-btn success" onclick="openExcelTracker()" title="Open Excel history tracking all URLs and full description captions">
-                <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                <span>Excel Tracker (.xlsx)</span>
+        <!-- Action Toolbar -->
+        <div class="app-toolbar">
+            <button class="tb-button highlight" onclick="pasteClipboardDirect()" title="Read clipboard, auto-extract all links line-by-line, and open Download composer">
+                <svg viewBox="0 0 24 24" fill="#15803d"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
+                <span>Paste Link</span>
             </button>
 
-            <button class="tool-btn" onclick="syncTrackerCloud()" title="Sync download history directly to GitHub cloud repository">
-                <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+            <button class="tb-button" id="btn-start-all" onclick="startAllTasks()" title="Start or resume all queued / paused downloads">
+                <svg viewBox="0 0 24 24" fill="#15803d"><path d="M8 5v14l11-7z"/></svg>
+                <span>Start All</span>
+            </button>
+
+            <button class="tb-button" id="btn-pause-all" onclick="pauseAllTasks()" title="Pause all active downloads">
+                <svg viewBox="0 0 24 24" fill="#d97706"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                <span>Pause All</span>
+            </button>
+
+            <div class="tb-separator"></div>
+
+            <button class="tb-button" onclick="removeCompletedTasks()" title="Remove all completed tasks from the grid">
+                <svg viewBox="0 0 24 24" fill="#64748b"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                <span>Remove Completed</span>
+            </button>
+
+            <button class="tb-button" onclick="clearAllTasks()" title="Clear all tasks from the grid">
+                <svg viewBox="0 0 24 24" fill="#dc2626"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                <span>Clear All</span>
+            </button>
+
+            <div class="tb-separator"></div>
+
+            <button class="tb-button" onclick="openDownloadFolder()" title="Open the current save folder in Windows Explorer">
+                <svg viewBox="0 0 24 24" fill="#2563eb"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <span>Open Folder</span>
+            </button>
+
+            <button class="tb-button" onclick="openExcelTracker()" title="Open Excel history spreadsheet tracking all titles and full descriptions">
+                <svg viewBox="0 0 24 24" fill="#15803d"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+                <span>Excel Tracker</span>
+            </button>
+
+            <button class="tb-button" onclick="syncTrackerCloud()" title="Sync download history to GitHub cloud">
+                <svg viewBox="0 0 24 24" fill="#0284c7"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                 <span>Cloud Sync</span>
             </button>
 
-            <button class="tool-btn" onclick="openUpdateDialog()" title="Check for app updates or dynamic extraction algorithm updates">
-                <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
-                <span>Updates</span>
-            </button>
-
-            <button class="tool-btn" onclick="openLogsDialog()" title="View real-time engine execution logs">
-                <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
+            <button class="tb-button" onclick="openLogsModal()" title="View live engine and execution logs">
+                <svg viewBox="0 0 24 24" fill="#475569"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                 <span>Logs</span>
             </button>
+
+            <button class="tb-button" onclick="openUpdateModal()" title="Check for app updates or dynamic extractor updates">
+                <svg viewBox="0 0 24 24" fill="#7c3aed"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                <span>Updates</span>
+            </button>
         </div>
-    </header>
+    </div>
 
     <!-- Main Workspace -->
-    <main class="workspace">
+    <div class="app-body">
 
-        <!-- Hero Quick-Paste Download Card -->
-        <section class="quick-download-card">
-            <div class="input-row">
-                <div class="url-input-wrap">
-                    <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
-                    <input type="text" id="single-url-input" class="url-input" placeholder="Paste video link here (Facebook, YouTube, TikTok, Reels, Instagram, Twitter)..." autocomplete="off">
-                    <button class="paste-btn-inside" onclick="pasteClipboardSingle()">Paste</button>
-                </div>
-
-                <select id="quick-quality-select" class="select-pill" title="Video Quality Preset">
-                    <option value="Best Quality" selected>⭐ Best (Original Upload Quality)</option>
-                    <option value="1080p">1080p (Full HD Cap)</option>
-                    <option value="720p">720p (HD Cap)</option>
-                    <option value="480p">480p (Standard)</option>
-                    <option value="360p">360p (Data Saver / Mobile)</option>
-                    <option value="Audio Only">🎵 Audio Only (MP3 / M4A)</option>
-                </select>
-
-                <select id="quick-concurrency-select" class="select-pill" title="Parallel simultaneous downloads">
-                    <option value="4" selected>4 Parallel (Fast)</option>
-                    <option value="2">2 Parallel</option>
-                    <option value="6">6 Parallel</option>
-                    <option value="1">1 by 1</option>
-                </select>
-
-                <button class="btn-download-primary" onclick="submitQuickDownload()">
-                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                    <span>Download</span>
-                </button>
-
-                <button class="btn-batch-toggle" id="btn-batch-toggle" onclick="toggleBatchDrawer()" title="Expand multi-link batch paste drawer">
-                    <span>Batch Queue (+)</span>
-                </button>
-            </div>
-
-            <!-- Batch Drawer -->
-            <div class="batch-drawer" id="batch-drawer">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Multi-Link Batch Queue (One link per line)</span>
-                    <span id="batch-link-count" style="font-size: 11px; color: #64748b; font-weight: 600;">0 links detected</span>
-                </div>
-                <textarea id="batch-urls-input" class="batch-textarea" placeholder="Paste multiple video URLs here (one URL per line)...&#10;Paste from clipboard or text: links will automatically be split line-by-line with breakers!"></textarea>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-                    <div style="display: flex; gap: 8px;">
-                        <button class="btn-ctrl" style="height: 32px; font-size: 11px; padding: 0 12px; background: #1e293b; color: #38bdf8;" onclick="pasteClipboardToBatch()">📋 Paste Clipboard</button>
-                        <button class="btn-ctrl ghost" style="height: 32px; font-size: 11px; padding: 0 10px;" onclick="clearBatchTextarea()">Clear</button>
+        <!-- 1. DOWNLOAD COMPOSER VIEW -->
+        <div class="view-panel active" id="view-download">
+            <div class="composer-view">
+                <div class="composer-card">
+                    <div class="composer-header-row">
+                        <span class="composer-title">Video or audio links (One link per line):</span>
+                        <span class="badge-count" id="composer-count-badge">0 links detected</span>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="btn-ctrl ghost" style="height: 32px; font-size: 11px;" onclick="toggleBatchDrawer()">Collapse</button>
-                        <button class="btn-download-primary" style="height: 34px; padding: 0 16px; font-size: 12px;" onclick="submitBatchDownload()">Start Batch Download</button>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Path & Features Bar -->
-            <div class="sub-bar-options">
-                <div class="path-indicator">
-                    <span>Save to:</span>
-                    <span class="path-text" id="display-save-path">{{ default_dir }}</span>
-                    <span class="text-action-link" onclick="promptChangeFolder()">Change</span>
-                    <span class="text-action-link" onclick="openFolder(currentSaveDir)">Open</span>
-                </div>
-                <div style="display: flex; gap: 14px; font-size: 11px; color: #94a3b8; flex-wrap: wrap;">
-                    <span>🎯 <strong>Quality:</strong> Native uploaded resolution (360p, 720p, etc.) preserved without upscaling</span>
-                    <span>✨ <strong>Cleaner:</strong> Metric & reaction stripper active</span>
-                </div>
-            </div>
-        </section>
+                    <!-- Large Multi-Line Textarea with Auto-Break Formatter -->
+                    <textarea id="composer-urls-input" class="composer-textarea" placeholder="Paste video or audio links here (one link per line)...&#10;Paste individual links, comma-separated lists, or large blocks: links will automatically be extracted and formatted onto individual lines with line breaks!&#10;&#10;Supports: Facebook (Videos & Reels), YouTube, Instagram, TikTok, Twitter/X, and 1,000+ sources."></textarea>
 
-        <!-- Queue Filter & Action Bar -->
-        <section class="queue-header-row">
-            <div class="filter-tabs">
-                <button class="filter-tab-pill active" id="filter-all" onclick="setFilter('All')">
-                    <span>All</span>
-                    <span class="filter-count-badge" id="count-all">0</span>
-                </button>
-                <button class="filter-tab-pill" id="filter-processing" onclick="setFilter('Processing')">
-                    <span>Downloading</span>
-                    <span class="filter-count-badge" id="count-processing">0</span>
-                </button>
-                <button class="filter-tab-pill" id="filter-paused" onclick="setFilter('Paused')">
-                    <span>Paused</span>
-                    <span class="filter-count-badge" id="count-paused">0</span>
-                </button>
-                <button class="filter-tab-pill" id="filter-completed" onclick="setFilter('Completed')">
-                    <span>Completed</span>
-                    <span class="filter-count-badge" id="count-completed">0</span>
-                </button>
-                <button class="filter-tab-pill" id="filter-failed" onclick="setFilter('Failed')">
-                    <span>Failed</span>
-                    <span class="filter-count-badge" id="count-failed">0</span>
-                </button>
-            </div>
-
-            <div class="queue-actions">
-                <button class="btn-ctrl start" id="btn-start-all" onclick="startAllQueued()">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    <span>Start All</span>
-                </button>
-                <button class="btn-ctrl pause" id="btn-pause-all" onclick="pauseAll()" disabled>
-                    <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                    <span>Pause All</span>
-                </button>
-                <button class="btn-ctrl ghost" onclick="removeCompleted()">
-                    <span>Clear Completed</span>
-                </button>
-                <button class="btn-ctrl ghost" style="color: #ef4444;" onclick="clearAll()">
-                    <span>Clear All</span>
-                </button>
-            </div>
-        </section>
-
-        <!-- Task List Scroll Container -->
-        <section class="task-list-scroll" id="task-list-container">
-            <div class="empty-holder" id="empty-state">
-                <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                <h4>No active downloads</h4>
-                <p>Paste any video or audio link from Facebook, YouTube, TikTok, Instagram, or Reels above to begin high-speed downloading.</p>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- Footer Bar -->
-    <footer class="footer-bar">
-        <span class="footer-status-text" id="footer-status-label">Ready</span>
-        <span id="footer-summary-counts">0 downloads queued</span>
-    </footer>
-
-    <!-- Software & Extractor Updates Modal Dialog -->
-    <div class="modal-overlay" id="update-modal">
-        <div class="modal-window">
-            <div class="modal-top">
-                <span>Software & Extractor Updates</span>
-                <span class="close-icon-btn" onclick="closeUpdateDialog()">✕</span>
-            </div>
-            <div class="modal-body">
-                <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-size: 13px; font-weight: 700; color: #ffffff;">{{ app_name }} Application</div>
-                            <div style="font-size: 11px; color: var(--text-sub);">Installed: <strong>v{{ app_version }}</strong> &bull; Channel: GitHub Releases</div>
+                    <div class="composer-btn-bar">
+                        <div class="action-group-left">
+                            <button class="composer-btn" onclick="pasteClipboardToComposer()">
+                                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #2563eb;"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
+                                <span>Paste from Clipboard</span>
+                            </button>
+                            <button class="composer-btn danger" onclick="clearComposer()">
+                                <span>Clear</span>
+                            </button>
                         </div>
-                        <button class="tool-btn" id="btn-check-app-update" onclick="checkAppUpdates()">Check Now</button>
-                    </div>
-                    <div id="update-check-result" style="font-size: 11px; color: var(--text-muted); padding: 8px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; display: none;"></div>
-                </div>
-
-                <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-size: 13px; font-weight: 700; color: #ffffff;">Video Scraper Algorithms (yt-dlp)</div>
-                            <div style="font-size: 11px; color: var(--text-sub);">Dynamically refresh Facebook, YouTube, TikTok extraction rules without reinstalling</div>
+                        <div style="font-size: 11px; color: #64748b;">
+                            Smart Breaker active: Multiple URLs are automatically split line-by-line.
                         </div>
-                        <button class="btn-download-primary" style="height: 32px; font-size: 11px; padding: 0 12px;" id="btn-update-engine" onclick="updateExtractorEngine()">Update Extractors</button>
                     </div>
-                    <div id="engine-update-result" style="font-size: 11px; color: var(--success); display: none;"></div>
-                </div>
-            </div>
-            <div class="modal-bottom">
-                <button class="tool-btn" onclick="closeUpdateDialog()">Close</button>
-            </div>
-        </div>
-    </div>
 
-    <!-- Live Execution Logs Modal Dialog -->
-    <div class="modal-overlay" id="logs-modal">
-        <div class="modal-window" style="width: 760px;">
-            <div class="modal-top">
-                <span>Real-Time Execution Logs</span>
-                <span class="close-icon-btn" onclick="closeLogsDialog()">✕</span>
-            </div>
-            <div class="modal-body">
-                <textarea id="logs-textarea" readonly style="width: 100%; height: 320px; background: #080d17; border: 1px solid #1e293b; border-radius: 8px; color: #10b981; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 10px; line-height: 1.45; outline: none;"></textarea>
-            </div>
-            <div class="modal-bottom">
-                <button class="tool-btn" onclick="fetchLogs()">Refresh</button>
-                <button class="tool-btn" onclick="navigator.clipboard.writeText(document.getElementById('logs-textarea').value); alert('Logs copied to clipboard!');">Copy Logs</button>
-                <button class="btn-download-primary" style="height: 32px; font-size: 12px; padding: 0 14px;" onclick="closeLogsDialog()">Done</button>
-            </div>
-        </div>
-    </div>
+                    <div class="composer-grid-settings">
+                        <div class="setting-field">
+                            <label class="setting-label">Quality Preset</label>
+                            <select id="composer-quality-select" class="setting-select">
+                                <option value="Best Quality" selected>⭐ Best (Original Uploaded Quality - No Upscaling)</option>
+                                <option value="1080p">1080p Full HD (Max 1080p)</option>
+                                <option value="720p">720p HD (Max 720p)</option>
+                                <option value="480p">480p SD (Standard)</option>
+                                <option value="360p">360p Low (Mobile / Data Saver)</option>
+                                <option value="Audio Only">🎵 Audio Only (MP3 192k / Best Audio)</option>
+                            </select>
+                        </div>
 
-    <script>
-        let currentSaveDir = "{{ default_dir }}";
-        let activeFilter = 'All';
-        let pollInterval = null;
-        let taskList = [];
+                        <div class="setting-field">
+                            <label class="setting-label">Simultaneous Parallel Downloads</label>
+                            <select id="composer-parallel-select" class="setting-select">
+                                <option value="4" selected>4 Simultaneous (Fast & Stable)</option>
+                                <option value="2">2 Simultaneous</option>
+                                <option value="6">6 Simultaneous</option>
+                                <option value="1">1 by 1</option>
+                            </select>
+                        </div>
+                    </div>
 
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
+                    <div class="setting-field">
+                        <label class="setting-label">Save To Folder</label>
+                        <div class="folder-row">
+                            <input type="text" id="composer-save-dir" class="setting-input" value="{{ default_dir }}">
+                            <button class="composer-btn" onclick="openDownloadFolder()">Browse...</button>
+                        </div>
+                    </div>
 
-        function detectPlatform(url) {
-            const u = (url || '').toLowerCase();
-            if (u.includes('facebook.com') || u.includes('fb.watch') || u.includes('fb.com')) return { name: 'Facebook', cls: 'facebook' };
-            if (u.includes('youtube.com') || u.includes('youtu.be')) return { name: 'YouTube', cls: 'youtube' };
-            if (u.includes('tiktok.com')) return { name: 'TikTok', cls: 'tiktok' };
-            if (u.includes('instagram.com')) return { name: 'Instagram', cls: 'instagram' };
-            return { name: 'Web', cls: 'generic' };
-        }
-
-        function toggleBatchDrawer() {
-            const el = document.getElementById('batch-drawer');
-            const btn = document.getElementById('btn-batch-toggle');
-            if (el.style.display === 'flex') {
-                el.style.display = 'none';
-                btn.style.color = 'var(--text-muted)';
-            } else {
-                el.style.display = 'flex';
-                btn.style.color = '#38bdf8';
-                document.getElementById('batch-urls-input').focus();
-            }
-        }
-
-        function extractUrls(text) {
-            if (!text) return [];
-            // Match any http:// or https:// URL, stopping at whitespace, quotes, or angle brackets
-            const regex = /https?:\/\/[^\s"',<>\u3000]+/gi;
-            const matches = text.match(regex);
-            if (matches && matches.length > 0) {
-                // Strip trailing punctuation like . , ; : ) ] }
-                const cleaned = matches.map(u => u.replace(/[.,;:\)\]\}]+$/, '')).filter(u => u.length > 8);
-                return Array.from(new Set(cleaned));
-            }
-            // Fallback: split by newlines, carriage returns, or spaces
-            const parts = text.split(/[\r\n\s,;]+/);
-            return Array.from(new Set(parts.map(s => s.trim()).filter(s => s.length > 8 && s.toLowerCase().startsWith('http'))));
-        }
-
-        function updateBatchCounter() {
-            const text = document.getElementById('batch-urls-input').value;
-            const urls = extractUrls(text);
-            const countEl = document.getElementById('batch-link-count');
-            if (countEl) {
-                countEl.innerText = urls.length === 1 ? '1 link detected' : `${urls.length} links detected`;
-                countEl.style.color = urls.length > 0 ? '#10b981' : '#64748b';
-            }
-        }
-
-        function openBatchWithUrls(urls) {
-            const drawer = document.getElementById('batch-drawer');
-            const btn = document.getElementById('btn-batch-toggle');
-            drawer.style.display = 'flex';
-            btn.style.color = '#38bdf8';
-
-            const area = document.getElementById('batch-urls-input');
-            const existing = extractUrls(area.value);
-            const merged = Array.from(new Set([...existing, ...urls]));
-            area.value = merged.join('\n');
-            updateBatchCounter();
-            area.focus();
-
-            // Clear the single input so there's no confusion
-            document.getElementById('single-url-input').value = '';
-        }
-
-        async function pasteClipboardSingle() {
-            try {
-                let text = '';
-                if (navigator.clipboard && navigator.clipboard.readText) {
-                    text = await navigator.clipboard.readText();
-                } else {
-                    text = prompt("Paste your video link(s) here:");
-                }
-                if (!text) return;
-
-                const urls = extractUrls(text);
-                if (urls.length > 1) {
-                    openBatchWithUrls(urls);
-                } else if (urls.length === 1) {
-                    document.getElementById('single-url-input').value = urls[0];
-                } else {
-                    document.getElementById('single-url-input').value = text.trim();
-                }
-            } catch(e) {
-                const text = prompt("Paste your video link(s) here:");
-                if (text) {
-                    const urls = extractUrls(text);
-                    if (urls.length > 1) openBatchWithUrls(urls);
-                    else if (urls.length === 1) document.getElementById('single-url-input').value = urls[0];
-                    else document.getElementById('single-url-input').value = text.trim();
-                }
-            }
-        }
-
-        async function pasteClipboardToBatch() {
-            try {
-                let text = '';
-                if (navigator.clipboard && navigator.clipboard.readText) {
-                    text = await navigator.clipboard.readText();
-                } else {
-                    text = prompt("Paste your multiple video links here:");
-                }
-                if (!text) return;
-                const urls = extractUrls(text);
-                if (urls.length > 0) {
-                    openBatchWithUrls(urls);
-                } else {
-                    const area = document.getElementById('batch-urls-input');
-                    area.value = area.value ? (area.value + '\n' + text.trim()) : text.trim();
-                    updateBatchCounter();
-                }
-            } catch(e) {
-                const text = prompt("Paste your multiple video links here:");
-                if (text) {
-                    const urls = extractUrls(text);
-                    if (urls.length > 0) openBatchWithUrls(urls);
-                }
-            }
-        }
-
-        function clearBatchTextarea() {
-            document.getElementById('batch-urls-input').value = '';
-            updateBatchCounter();
-        }
-
-        function promptChangeFolder() {
-            const current = currentSaveDir;
-            const updated = prompt("Enter download folder path:", current);
-            if (updated && updated.trim()) {
-                currentSaveDir = updated.trim();
-                document.getElementById('display-save-path').innerText = currentSaveDir;
-            }
-        }
-
-        function setFilter(filter) {
-            activeFilter = filter;
-            document.querySelectorAll('.filter-tab-pill').forEach(el => el.classList.remove('active'));
-            const el = document.getElementById('filter-' + filter.toLowerCase());
-            if (el) el.classList.add('active');
-            renderTasks(taskList);
-        }
-
-        async function submitQuickDownload() {
-            const urlInput = document.getElementById('single-url-input');
-            const rawVal = urlInput.value.trim();
-            const urls = extractUrls(rawVal);
-            if (urls.length === 0) {
-                alert('Please enter or paste a valid video URL starting with http:// or https://');
-                urlInput.focus();
-                return;
-            }
-
-            const quality = document.getElementById('quick-quality-select').value;
-            const parallel = parseInt(document.getElementById('quick-concurrency-select').value) || 4;
-
-            urlInput.value = '';
-            // If multiple links were present, queue all of them!
-            await sendDownloadRequest(urls, quality, parallel);
-        }
-
-        async function submitBatchDownload() {
-            const text = document.getElementById('batch-urls-input').value;
-            const urls = extractUrls(text);
-
-            if (urls.length === 0) {
-                alert('Please paste at least one valid video URL starting with http:// or https://');
-                return;
-            }
-
-            const quality = document.getElementById('quick-quality-select').value;
-            const parallel = parseInt(document.getElementById('quick-concurrency-select').value) || 4;
-
-            document.getElementById('batch-urls-input').value = '';
-            updateBatchCounter();
-            toggleBatchDrawer();
-            await sendDownloadRequest(urls, quality, parallel);
-        }
-
-        async function sendDownloadRequest(urls, quality, parallel) {
-            document.getElementById('footer-status-label').innerText = `Starting ${urls.length} download(s)...`;
-            try {
-                const resp = await fetch('/api/download', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        urls: urls,
-                        quality: quality,
-                        parallel: parallel,
-                        save_dir: currentSaveDir
-                    })
-                });
-                const res = await resp.json();
-                if (res.error) {
-                    alert('Error: ' + res.error);
-                    return;
-                }
-                pollStatusOnce();
-            } catch (e) {
-                alert('Failed to start download: ' + e);
-            }
-        }
-
-        let isPolling = false;
-        async function pollStatusOnce() {
-            if (isPolling) return;
-            isPolling = true;
-            try {
-                const resp = await fetch('/api/status');
-                const data = await resp.json();
-                taskList = data.tasks || [];
-
-                // Badges
-                document.getElementById('count-all').innerText = data.total || 0;
-                document.getElementById('count-processing').innerText = data.active || 0;
-                document.getElementById('count-completed').innerText = data.completed || 0;
-                document.getElementById('count-failed').innerText = data.errors || 0;
-                document.getElementById('count-paused').innerText = (data.paused || data.cancelled || 0);
-
-                // Speed calculation
-                let totalSpeedKB = 0;
-                taskList.forEach(t => {
-                    if (t.speed && t.speed.includes('MiB/s')) {
-                        totalSpeedKB += parseFloat(t.speed) * 1024;
-                    } else if (t.speed && t.speed.includes('KiB/s')) {
-                        totalSpeedKB += parseFloat(t.speed);
-                    }
-                });
-                document.getElementById('sb-total-speed').innerText = `↓ ${totalSpeedKB.toFixed(2)} KB/s`;
-
-                // Sleep status
-                const powerDot = document.getElementById('power-dot');
-                const powerText = document.getElementById('power-status-text');
-                if (data.is_busy) {
-                    powerDot.classList.add('active');
-                    powerText.innerText = 'Laptop Awake (Sleep Blocked)';
-                    powerText.style.color = '#10b981';
-                } else {
-                    powerDot.classList.remove('active');
-                    powerText.innerText = 'Sleep: Normal';
-                    powerText.style.color = '#94a3b8';
-                }
-
-                // Controls
-                const hasUnfinished = taskList.some(t => ['PAUSED', 'CANCELLED', 'ERROR', 'QUEUED'].includes(t.status));
-                document.getElementById('btn-start-all').disabled = !hasUnfinished;
-                document.getElementById('btn-pause-all').disabled = !data.is_busy;
-
-                // Footer
-                if (data.is_busy) {
-                    document.getElementById('footer-status-label').innerText = `Downloading ${data.active} video(s) in parallel...`;
-                } else {
-                    document.getElementById('footer-status-label').innerText = data.total > 0 ? (hasUnfinished ? 'Paused / Waiting' : 'Completed') : 'Ready';
-                }
-                document.getElementById('footer-summary-counts').innerText = `${data.total} downloads: ${data.completed} finished, ${data.active} running`;
-
-                renderTasks(taskList);
-            } catch (err) {
-            } finally {
-                isPolling = false;
-            }
-        }
-
-        function startPolling() {
-            if (pollInterval) clearInterval(pollInterval);
-            pollStatusOnce();
-            pollInterval = setInterval(pollStatusOnce, 1200);
-        }
-
-        function renderTasks(tasks) {
-            const container = document.getElementById('task-list-container');
-            let filtered = tasks;
-
-            if (activeFilter === 'Processing') {
-                filtered = tasks.filter(t => ['CONNECTING', 'DOWNLOADING', 'POST_PROCESSING', 'QUEUED'].includes(t.status) || t.status.startsWith('AUTO-RESUMING'));
-            } else if (activeFilter === 'Completed') {
-                filtered = tasks.filter(t => t.status === 'COMPLETED');
-            } else if (activeFilter === 'Failed') {
-                filtered = tasks.filter(t => t.status === 'ERROR');
-            } else if (activeFilter === 'Paused') {
-                filtered = tasks.filter(t => ['PAUSED', 'CANCELLED'].includes(t.status));
-            }
-
-            if (filtered.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-holder">
+                    <button class="btn-download-hero" onclick="submitComposerDownload()">
                         <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                        <h4>${tasks.length === 0 ? 'No downloads queued' : 'No items match this filter'}</h4>
-                        <p>${tasks.length === 0 ? 'Paste any link into the top bar to begin.' : 'Select "All" to view all downloads.'}</p>
+                        <span>Download Now</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. TASKS GRID VIEW -->
+        <div class="view-panel" id="view-tasks">
+            <div class="tasks-view">
+                <!-- Left Sidebar Filters -->
+                <div class="app-sidebar">
+                    <div class="sb-category active" id="filter-all" onclick="setFilter('All')">
+                        <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+                        <span>All</span>
+                        <span class="sb-count" id="count-all">0</span>
                     </div>
-                `;
-                return;
-            }
 
-            const emptyHolder = container.querySelector('.empty-holder');
-            if (emptyHolder) emptyHolder.remove();
+                    <div class="sb-category" id="filter-processing" onclick="setFilter('Processing')">
+                        <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                        <span>Processing</span>
+                        <span class="sb-count" id="count-processing">0</span>
+                    </div>
 
-            const activeIds = new Set(filtered.map(t => String(t.id)));
-            const existingCards = container.querySelectorAll('.task-card');
-            existingCards.forEach(card => {
-                const cardId = card.getAttribute('data-task-id');
-                if (!activeIds.has(cardId)) {
-                    card.remove();
-                }
-            });
+                    <div class="sb-category" id="filter-paused" onclick="setFilter('Paused')">
+                        <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        <span>Paused</span>
+                        <span class="sb-count" id="count-paused">0</span>
+                    </div>
 
-            filtered.forEach(task => {
-                let card = document.getElementById(`task-card-${task.id}`);
-                const isAudio = task.title.toLowerCase().endsWith('.mp3') || (task.format_str && task.format_str.includes('audio') && !task.format_str.includes('video'));
-                const badgeFormat = isAudio ? 'MP3' : 'HD';
-                const platform = detectPlatform(task.url);
+                    <div class="sb-category" id="filter-completed" onclick="setFilter('Completed')">
+                        <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                        <span>Completed</span>
+                        <span class="sb-count" id="count-completed">0</span>
+                    </div>
 
-                const safeUrl = escapeHtml(task.url);
-                const safeTitle = escapeHtml(task.title);
-                const safeDir = (task.save_dir || currentSaveDir || '').replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
-                const cardClass = task.status === 'DOWNLOADING' ? 'task-card active-download' : 'task-card';
+                    <div class="sb-category" id="filter-failed" onclick="setFilter('Failed')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                        <span>Failed</span>
+                        <span class="sb-count" id="count-failed">0</span>
+                    </div>
+                </div>
 
-                const sizeDisplay = (task.downloaded_bytes !== '—' && task.total_bytes !== '—') 
-                    ? `${task.downloaded_bytes} / ${task.total_bytes}` 
-                    : (task.total_bytes !== '—' ? task.total_bytes : '—');
+                <!-- Kotato Table Grid -->
+                <div class="grid-container">
+                    <div class="grid-header">
+                        <div>Icon</div>
+                        <div>Source URL</div>
+                        <div>Destination (Clean Title)</div>
+                        <div>Quality</div>
+                        <div>Duration</div>
+                        <div>Size</div>
+                        <div>Status & Progress</div>
+                        <div>Actions</div>
+                    </div>
 
-                let statusClass = 'queued';
-                let statusLabel = task.status;
-                if (task.status === 'DOWNLOADING') {
-                    statusClass = 'downloading';
-                    statusLabel = `Downloading ${task.percent}%`;
-                } else if (task.status === 'COMPLETED') {
-                    statusClass = 'completed';
-                    statusLabel = 'Completed';
-                } else if (task.status === 'PAUSED' || task.status === 'CANCELLED') {
-                    statusClass = 'paused';
-                    statusLabel = 'Paused';
-                } else if (task.status === 'ERROR') {
-                    statusClass = 'error';
-                    statusLabel = 'Failed';
-                } else if (task.status === 'POST_PROCESSING') {
-                    statusClass = 'downloading';
-                    statusLabel = 'Finalizing';
-                }
-
-                let actionHtml = '';
-                if (['DOWNLOADING', 'CONNECTING', 'POST_PROCESSING'].includes(task.status) || task.status.startsWith('AUTO-RESUMING')) {
-                    actionHtml = `<button class="task-action-btn" onclick="pauseTask(${task.id})">⏸ Pause</button>`;
-                } else if (['PAUSED', 'CANCELLED', 'ERROR', 'QUEUED'].includes(task.status)) {
-                    actionHtml = `<button class="task-action-btn" style="color: #38bdf8;" onclick="resumeTask(${task.id})">▶ Resume</button>`;
-                } else if (task.status === 'COMPLETED') {
-                    actionHtml = `<button class="task-action-btn btn-folder" onclick="openFolder('${safeDir}')">📂 Open Folder</button>`;
-                }
-
-                if (!card) {
-                    card = document.createElement('div');
-                    card.id = `task-card-${task.id}`;
-                    card.setAttribute('data-task-id', String(task.id));
-                    card.className = cardClass;
-                    card.innerHTML = `
-                        <!-- Thumbnail Box -->
-                        <div class="thumb-box">
-                            <svg class="bg-play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            <span class="badge-format">${badgeFormat}</span>
-                            <span class="badge-platform ${platform.cls}">${platform.name}</span>
+                    <div class="grid-body" id="grid-items">
+                        <div class="grid-empty-state" id="empty-state">
+                            <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                            <span>No download tasks. Click <strong>Paste Link</strong> or use the <strong>Download</strong> tab to add videos.</span>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-                        <!-- Task Center Info -->
-                        <div class="task-center">
-                            <div class="title-row">
-                                <span class="video-title" title="${safeTitle}">${safeTitle}</span>
-                            </div>
-                            <div class="video-source-url" onclick="window.open('${safeUrl}', '_blank')" title="${safeUrl}">
-                                ${safeUrl}
-                            </div>
-                            <div class="meta-stat-row">
-                                <span class="stat-badge-status ${statusClass}">${statusLabel}</span>
-                                <span class="stat-item active-speed" style="${task.speed && task.speed !== '—' ? '' : 'display:none;'}">↓ ${task.speed || ''}</span>
-                                <span class="stat-item eta-item" style="${task.eta && task.eta !== '—' ? '' : 'display:none;'}">ETA: ${task.eta || ''}</span>
-                                <span class="stat-item size-item">${escapeHtml(sizeDisplay)}</span>
-                            </div>
-                        </div>
+        <!-- 3. CONVERT VIEW -->
+        <div class="view-panel" id="view-convert">
+            <div class="composer-view">
+                <div class="composer-card">
+                    <span class="composer-title">Audio / Video Converter</span>
+                    <p style="color: #64748b; font-size: 12px; line-height: 1.5;">
+                        StreamVault Pro automatically extracts and converts audio directly to MP3 or M4A using bundled FFmpeg.
+                        To download audio directly from any video, select <strong>Audio Only (MP3 192k)</strong> in the Quality selector.
+                    </p>
+                    <button class="composer-btn" style="width: fit-content;" onclick="selectQualityAndSwitch('Audio Only')">
+                        🎵 Switch to Audio Only (MP3) Mode
+                    </button>
+                </div>
+            </div>
+        </div>
 
-                        <!-- Actions -->
-                        <div class="task-actions-col">
-                            <div class="action-btn-wrap">${actionHtml}</div>
-                            <button class="task-action-btn btn-remove" title="Remove" onclick="removeTask(${task.id})">✕</button>
-                        </div>
+        <!-- 4. HISTORY VIEW -->
+        <div class="view-panel" id="view-history">
+            <div class="composer-view">
+                <div class="composer-card">
+                    <div class="composer-header-row">
+                        <span class="composer-title">Download History & Metadata Archive</span>
+                        <button class="composer-btn" onclick="openExcelTracker()">📊 Open Excel Spreadsheet (.xlsx)</button>
+                    </div>
+                    <p style="color: #64748b; font-size: 12px; line-height: 1.5;">
+                        All downloaded videos, original URLs, clean titles, and complete Facebook descriptions are recorded in the Excel history tracker.
+                    </p>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="composer-btn" onclick="openDownloadFolder()">📁 Open Downloads Folder</button>
+                        <button class="composer-btn" onclick="syncTrackerCloud()">☁️ Sync Tracker to GitHub</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-                        <!-- Progress Underline -->
-                        <div class="card-progress-bar ${task.status === 'COMPLETED' ? 'completed' : ''}" style="width: ${task.percent}%;"></div>
-                    `;
-                    container.appendChild(card);
-                } else {
-                    card.className = cardClass;
-                    const titleEl = card.querySelector('.video-title');
-                    if (titleEl && titleEl.innerText !== task.title) {
-                        titleEl.innerText = task.title;
-                        titleEl.title = task.title;
-                    }
+    </div>
 
-                    const statusBadge = card.querySelector('.stat-badge-status');
-                    if (statusBadge) {
-                        statusBadge.className = `stat-badge-status ${statusClass}`;
-                        statusBadge.innerText = statusLabel;
-                    }
+    <!-- Status Bar -->
+    <div class="app-statusbar">
+        <div class="sb-status-item">
+            <span id="sb-status-text">Ready</span>
+        </div>
+        <div class="sb-status-item">
+            <span>Folder:</span>
+            <span id="sb-folder-text" style="font-family: monospace; color: #2563eb; cursor: pointer;" onclick="openDownloadFolder()">{{ default_dir }}</span>
+        </div>
+        <div class="sb-status-item right">
+            <span id="sb-speed-text">Speed: 0.00 KB/s</span>
+        </div>
+    </div>
+</div>
 
-                    const speedEl = card.querySelector('.active-speed');
-                    if (speedEl) {
-                        if (task.speed && task.speed !== '—') {
-                            speedEl.style.display = '';
-                            speedEl.innerText = `↓ ${task.speed}`;
-                        } else {
-                            speedEl.style.display = 'none';
-                        }
-                    }
+<!-- Modal: Execution Logs -->
+<div class="modal-backdrop" id="logs-modal">
+    <div class="modal-card" style="width: 780px;">
+        <div class="modal-header">
+            <span>Engine & Multi-Threading Execution Logs</span>
+            <span style="cursor: pointer;" onclick="closeLogsModal()">✕</span>
+        </div>
+        <div class="modal-body">
+            <textarea id="logs-textarea" readonly style="height: 340px; background: #0f172a; color: #4ade80; font-family: monospace; font-size: 11px; padding: 12px; border-radius: 4px; resize: none;"></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="composer-btn" onclick="fetchLogs()">Refresh</button>
+            <button class="composer-btn" onclick="copyLogs()">Copy Logs</button>
+            <button class="composer-btn" onclick="closeLogsModal()">Close</button>
+        </div>
+    </div>
+</div>
 
-                    const etaEl = card.querySelector('.eta-item');
-                    if (etaEl) {
-                        if (task.eta && task.eta !== '—') {
-                            etaEl.style.display = '';
-                            etaEl.innerText = `ETA: ${task.eta}`;
-                        } else {
-                            etaEl.style.display = 'none';
-                        }
-                    }
+<!-- Modal: Updates -->
+<div class="modal-backdrop" id="update-modal">
+    <div class="modal-card">
+        <div class="modal-header">
+            <span>Software & Video Extractor Updates</span>
+            <span style="cursor: pointer;" onclick="closeUpdateModal()">✕</span>
+        </div>
+        <div class="modal-body">
+            <div id="update-status-box" style="padding: 12px; background: #f1f5f9; border-radius: 4px; font-size: 12px;">
+                Checking for updates...
+            </div>
+            <div style="border-top: 1px solid #cbd5e1; padding-top: 10px; margin-top: 6px;">
+                <strong>Dynamic Extractor Engine:</strong>
+                <p style="color: #64748b; font-size: 11px; margin-top: 4px;">
+                    When video platforms update their video player algorithms, you can update extraction algorithms on-the-fly without reinstalling.
+                </p>
+                <button class="composer-btn" style="margin-top: 8px;" onclick="updateEngine()">Update Extraction Algorithms</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="composer-btn" onclick="closeUpdateModal()">Close</button>
+        </div>
+    </div>
+</div>
 
-                    const sizeEl = card.querySelector('.size-item');
-                    if (sizeEl) sizeEl.innerText = sizeDisplay;
+<script>
+    // State
+    let currentTab = 'download';
+    let currentFilter = 'All';
+    let isPolling = false;
+    let allTasks = [];
 
-                    const barEl = card.querySelector('.card-progress-bar');
-                    if (barEl) {
-                        barEl.className = `card-progress-bar ${task.status === 'COMPLETED' ? 'completed' : ''}`;
-                        barEl.style.width = `${task.percent}%`;
-                    }
+    // --- TAB SWITCHING ---
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
 
-                    const actionWrap = card.querySelector('.action-btn-wrap');
-                    if (actionWrap && actionWrap.innerHTML !== actionHtml) {
-                        actionWrap.innerHTML = actionHtml;
-                    }
-                }
-            });
+        const btn = document.getElementById('tab-' + tab + '-btn');
+        const view = document.getElementById('view-' + tab);
+        if (btn) btn.classList.add('active');
+        if (view) view.classList.add('active');
+
+        if (tab === 'history') {
+            setFilter('Completed');
+        }
+    }
+
+    function selectQualityAndSwitch(q) {
+        document.getElementById('composer-quality-select').value = q;
+        switchTab('download');
+    }
+
+    // --- URL EXTRACTION & FORMATTING ---
+    // Bulletproof: handles spaces, tabs, commas, newlines, quotes, brackets.
+    // Every single URL is extracted and formatted onto its own line with \n!
+    function extractUrls(text) {
+        if (!text) return [];
+        const regex = /https?:\\/\\/[^\\s"',<>\\u3000]+/gi;
+        const matches = text.match(regex) || [];
+        return Array.from(new Set(matches.map(u => u.trim())));
+    }
+
+    function updateComposerCount() {
+        const input = document.getElementById('composer-urls-input');
+        const urls = extractUrls(input.value);
+        const badge = document.getElementById('composer-count-badge');
+        badge.textContent = `${urls.length} link(s) detected`;
+    }
+
+    function formatTextareaWithLineBreakers() {
+        const input = document.getElementById('composer-urls-input');
+        const urls = extractUrls(input.value);
+        if (urls.length > 0) {
+            input.value = urls.join('\\n');
+        }
+        updateComposerCount();
+    }
+
+    async function pasteClipboardToComposer() {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) {
+                const urls = extractUrls(text);
+                const input = document.getElementById('composer-urls-input');
+                const existing = extractUrls(input.value);
+                const merged = Array.from(new Set([...existing, ...urls]));
+                input.value = merged.join('\\n');
+                updateComposerCount();
+            }
+        } catch (err) {
+            alert('Clipboard access denied. Please press Ctrl+V directly in the box.');
+        }
+    }
+
+    async function pasteClipboardDirect() {
+        switchTab('download');
+        await pasteClipboardToComposer();
+    }
+
+    function clearComposer() {
+        const input = document.getElementById('composer-urls-input');
+        input.value = '';
+        updateComposerCount();
+    }
+
+    // --- SUBMIT DOWNLOADS ---
+    async function submitComposerDownload() {
+        const input = document.getElementById('composer-urls-input');
+        const urls = extractUrls(input.value);
+
+        if (urls.length === 0) {
+            alert('Please paste at least one valid video URL starting with http:// or https://');
+            return;
         }
 
-        async function resumeTask(id) {
-            await fetch('/api/resume_task', {
+        const quality = document.getElementById('composer-quality-select').value;
+        const parallel = parseInt(document.getElementById('composer-parallel-select').value) || 4;
+        const saveDir = document.getElementById('composer-save-dir').value;
+
+        try {
+            const resp = await fetch('/api/download', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({task_id: id})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    urls: urls,
+                    quality: quality,
+                    parallel: parallel,
+                    save_dir: saveDir,
+                })
             });
-            pollStatusOnce();
-        }
-
-        async function pauseTask(id) {
-            await fetch('/api/pause_task', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({task_id: id})
-            });
-            pollStatusOnce();
-        }
-
-        async function removeTask(id) {
-            await fetch('/api/remove_task', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({task_id: id})
-            });
-            pollStatusOnce();
-        }
-
-        async function startAllQueued() {
-            const parallel = parseInt(document.getElementById('quick-concurrency-select').value) || 4;
-            await fetch('/api/start_all', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({parallel: parallel})
-            });
-            pollStatusOnce();
-        }
-
-        async function pauseAll() {
-            await fetch('/api/pause_all', {method: 'POST'});
-            pollStatusOnce();
-        }
-
-        async function removeCompleted() {
-            await fetch('/api/remove_completed', {method: 'POST'});
-            pollStatusOnce();
-        }
-
-        async function clearAll() {
-            if (taskList.length === 0) return;
-            if (confirm('Are you sure you want to clear all tasks from the list?')) {
-                await fetch('/api/clear_all', {method: 'POST'});
-                pollStatusOnce();
+            const data = await resp.json();
+            if (data.success) {
+                // Clear composer
+                input.value = '';
+                updateComposerCount();
+                // Switch immediately to Tasks tab to view progress!
+                switchTab('tasks');
+                fetchStatus();
+            } else {
+                alert('Download error: ' + (data.error || 'Unknown error'));
             }
+        } catch (e) {
+            alert('Network connection error: ' + e);
+        }
+    }
+
+    // --- SIDEBAR FILTERS ---
+    function setFilter(filter) {
+        currentFilter = filter;
+        document.querySelectorAll('.sb-category').forEach(c => c.classList.remove('active'));
+        const el = document.getElementById('filter-' + filter.toLowerCase());
+        if (el) el.classList.add('active');
+        renderTasksGrid();
+    }
+
+    // --- IN-PLACE ULTRA-RESPONSIVE TASK RENDERING ---
+    function renderTasksGrid() {
+        const container = document.getElementById('grid-items');
+        const emptyState = document.getElementById('empty-state');
+
+        // Filter tasks
+        const filtered = allTasks.filter(t => {
+            if (currentFilter === 'All') return true;
+            if (currentFilter === 'Processing') return ['CONNECTING', 'DOWNLOADING', 'POST_PROCESSING'].includes(t.status);
+            if (currentFilter === 'Paused') return ['PAUSED', 'CANCELLED'].includes(t.status);
+            if (currentFilter === 'Completed') return t.status === 'COMPLETED';
+            if (currentFilter === 'Failed') return t.status === 'ERROR';
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            if (emptyState) emptyState.style.display = 'flex';
+            // Remove existing task rows
+            document.querySelectorAll('.task-row').forEach(r => r.remove());
+            return;
         }
 
-        async function openFolder(folder) {
-            await fetch('/api/open_folder', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({folder: folder || currentSaveDir})
-            });
-        }
+        if (emptyState) emptyState.style.display = 'none';
 
-        async function openExcelTracker() {
-            try {
-                const resp = await fetch('/api/open_tracker', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({folder: currentSaveDir})
-                });
-                const res = await resp.json();
-                if (res.error) alert(res.error);
-            } catch(e) {
-                alert('Could not open Excel tracker: ' + e);
-            }
-        }
-
-        async function syncTrackerCloud() {
-            document.getElementById('footer-status-label').innerText = 'Syncing Excel & CSV trackers to GitHub cloud...';
-            try {
-                const resp = await fetch('/api/sync_cloud', {method: 'POST'});
-                const res = await resp.json();
-                if (res.success) {
-                    alert('Spreadsheet tracker successfully synced and pushed to GitHub cloud!');
-                } else {
-                    alert('Cloud sync status: ' + (res.message || res.error || 'Done'));
-                }
-            } catch (e) {
-                alert('Cloud sync error: ' + e);
-            }
-            pollStatusOnce();
-        }
-
-        /* Auto-Updater JS Functions */
-        function openUpdateDialog() {
-            document.getElementById('update-modal').style.display = 'flex';
-            checkAppUpdates();
-        }
-
-        function closeUpdateDialog() {
-            document.getElementById('update-modal').style.display = 'none';
-        }
-
-        async function checkAppUpdates() {
-            const btn = document.getElementById('btn-check-app-update');
-            const resBox = document.getElementById('update-check-result');
-            btn.disabled = true;
-            resBox.style.display = 'block';
-            resBox.innerHTML = '<span style="color: #64748b;">Checking GitHub for updates...</span>';
-            try {
-                const resp = await fetch('/api/check_update');
-                const data = await resp.json();
-                btn.disabled = false;
-                if (data.has_update) {
-                    resBox.innerHTML = `
-                        <div style="display:flex; flex-direction:column; gap:6px;">
-                            <div style="font-weight:700; color:#10b981;">🚀 New Version Available: v${data.latest_version}</div>
-                            <div style="color:#94a3b8; font-size:11px;"><strong>Release Notes:</strong> ${data.release_notes || 'Bug fixes and performance improvements.'}</div>
-                            <button class="btn-download-primary" style="align-self:flex-start; margin-top:4px; height:32px; font-size:11px;" onclick="applyUpdate('${data.download_url}')">Update Now (Auto-Restart)</button>
-                        </div>
-                    `;
-                } else if (data.error) {
-                    resBox.innerHTML = `<span style="color: #f59e0b;">Notice: ${data.error}</span>`;
-                } else {
-                    resBox.innerHTML = `<span style="color: #10b981;">✓ You are running the latest version (v${data.current_version}). No update needed.</span>`;
-                }
-            } catch (e) {
-                btn.disabled = false;
-                resBox.innerHTML = `<span style="color: #ef4444;">Failed to check updates: ${e}</span>`;
-            }
-        }
-
-        async function applyUpdate(url) {
-            if (!confirm('This will download the latest update package, replace the app files in-place, and restart the app. Continue?')) return;
-            const resBox = document.getElementById('update-check-result');
-            resBox.innerHTML = '<span style="color: #38bdf8;">Downloading update package and applying in-place... App will restart in a few seconds.</span>';
-            try {
-                const resp = await fetch('/api/apply_update', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({download_url: url})
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    resBox.innerHTML = `<span style="color: #10b981;">${data.message}</span>`;
-                } else {
-                    alert('Update failed: ' + (data.error || 'Unknown error'));
-                }
-            } catch (e) {
-                resBox.innerHTML = '<span style="color: #10b981;">App is restarting with the new version...</span>';
-            }
-        }
-
-        async function updateExtractorEngine() {
-            const btn = document.getElementById('btn-update-engine');
-            const resBox = document.getElementById('engine-update-result');
-            btn.disabled = true;
-            resBox.style.display = 'block';
-            resBox.style.color = '#38bdf8';
-            resBox.innerText = 'Checking video extraction algorithms...';
-            try {
-                const resp = await fetch('/api/update_engine', {method: 'POST'});
-                const data = await resp.json();
-                btn.disabled = false;
-                if (data.success) {
-                    resBox.style.color = '#10b981';
-                    resBox.innerText = data.output || '✓ Extraction algorithms are up to date! Ready to download.';
-                } else {
-                    resBox.style.color = '#f59e0b';
-                    resBox.innerText = 'Notice: ' + (data.error || 'Already latest version.');
-                }
-            } catch (e) {
-                btn.disabled = false;
-                resBox.style.color = '#ef4444';
-                resBox.innerText = 'Error: ' + e;
-            }
-        }
-
-        /* Logs Functions */
-        function openLogsDialog() {
-            document.getElementById('logs-modal').style.display = 'flex';
-            fetchLogs();
-        }
-
-        function closeLogsDialog() {
-            document.getElementById('logs-modal').style.display = 'none';
-        }
-
-        async function fetchLogs() {
-            try {
-                const resp = await fetch('/api/logs');
-                const data = await resp.json();
-                const box = document.getElementById('logs-textarea');
-                box.value = (data.logs || []).join('\\n');
-                box.scrollTop = box.scrollHeight;
-            } catch(e) {}
-        }
-
-        // Start auto polling and attach paste handlers
-        window.addEventListener('DOMContentLoaded', () => {
-            startPolling();
-
-            const singleInput = document.getElementById('single-url-input');
-            if (singleInput) {
-                singleInput.addEventListener('paste', function(e) {
-                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
-                    const urls = extractUrls(pasted);
-                    if (urls.length > 1) {
-                        e.preventDefault();
-                        openBatchWithUrls(urls);
-                    }
-                });
-            }
-
-            const batchInput = document.getElementById('batch-urls-input');
-            if (batchInput) {
-                batchInput.addEventListener('paste', function(e) {
-                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
-                    const urls = extractUrls(pasted);
-                    if (urls.length > 0) {
-                        e.preventDefault();
-                        const existing = extractUrls(batchInput.value);
-                        const merged = Array.from(new Set([...existing, ...urls]));
-                        batchInput.value = merged.join('\n');
-                        updateBatchCounter();
-                    }
-                });
-                batchInput.addEventListener('input', updateBatchCounter);
+        const existingRowIds = new Set();
+        document.querySelectorAll('.task-row').forEach(row => {
+            const id = parseInt(row.id.replace('task-row-', ''));
+            if (!filtered.some(t => t.id === id)) {
+                row.remove();
+            } else {
+                existingRowIds.add(id);
             }
         });
-    </script>
+
+        filtered.forEach(task => {
+            let row = document.getElementById('task-row-' + task.id);
+            if (!row) {
+                row = document.createElement('div');
+                row.className = 'task-row';
+                row.id = 'task-row-' + task.id;
+                row.innerHTML = `
+                    <div class="cell-thumb">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                    <div class="cell-source" title="${task.url}">${task.url}</div>
+                    <div class="cell-title" id="title-${task.id}" title="${task.title || task.url}">${task.title || 'Connecting...'}</div>
+                    <div><span class="quality-pill" id="qual-${task.id}">Best</span></div>
+                    <div class="cell-duration" id="dur-${task.id}">—</div>
+                    <div class="cell-size" id="size-${task.id}">—</div>
+                    <div class="cell-progress">
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="pbar-${task.id}" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-meta">
+                            <span class="status-badge" id="badge-${task.id}">QUEUED</span>
+                            <span id="speed-${task.id}">—</span>
+                        </div>
+                    </div>
+                    <div class="cell-actions" id="actions-${task.id}">
+                        <button class="row-action-btn" onclick="toggleTask(${task.id}, '${task.status}')" title="Pause / Resume">
+                            <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        </button>
+                        <button class="row-action-btn" onclick="openDownloadFolder()" title="Open Folder">
+                            <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                        </button>
+                        <button class="row-action-btn" onclick="deleteTask(${task.id})" title="Delete">
+                            <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        </button>
+                    </div>
+                `;
+                container.appendChild(row);
+            }
+
+            // In-place text/attribute updates (lightweight, zero DOM rebuild)
+            const titleEl = document.getElementById('title-' + task.id);
+            if (titleEl && task.title && titleEl.textContent !== task.title) {
+                titleEl.textContent = task.title;
+                titleEl.title = task.title;
+            }
+
+            const pbar = document.getElementById('pbar-' + task.id);
+            if (pbar) {
+                pbar.style.width = task.percent + '%';
+                if (task.status === 'ERROR') pbar.style.background = '#dc2626';
+                else if (task.status === 'COMPLETED') pbar.style.background = '#16a34a';
+                else pbar.style.background = '#2563eb';
+            }
+
+            const badge = document.getElementById('badge-' + task.id);
+            if (badge) {
+                badge.className = 'status-badge ' + task.status;
+                badge.textContent = `${task.status} (${task.percent}%)`;
+            }
+
+            const speed = document.getElementById('speed-' + task.id);
+            if (speed) {
+                speed.textContent = task.speed !== '—' ? `${task.speed} • ETA ${task.eta}` : task.status;
+            }
+
+            const dur = document.getElementById('dur-' + task.id);
+            if (dur && task.duration_str) dur.textContent = task.duration_str;
+
+            const size = document.getElementById('size-' + task.id);
+            if (size && task.total_bytes) size.textContent = `${task.downloaded_bytes} / ${task.total_bytes}`;
+        });
+    }
+
+    // --- STATUS POLLING ---
+    async function fetchStatus() {
+        if (isPolling) return;
+        isPolling = true;
+
+        try {
+            const resp = await fetch('/api/status');
+            const data = await resp.json();
+
+            allTasks = data.tasks || [];
+
+            // Update tab badge
+            document.getElementById('tab-task-count').textContent = allTasks.length;
+
+            // Update sidebar counts
+            document.getElementById('count-all').textContent = data.total || 0;
+            document.getElementById('count-processing').textContent = data.active || 0;
+            document.getElementById('count-paused').textContent = data.paused || 0;
+            document.getElementById('count-completed').textContent = data.completed || 0;
+            document.getElementById('count-failed').textContent = data.errors || 0;
+
+            // Update status bar
+            const sbStatus = document.getElementById('sb-status-text');
+            if (data.is_busy) {
+                sbStatus.textContent = `Downloading ${data.active} of ${data.total} tasks (${data.overall_percent}%) • Sleep Prevention Active`;
+                document.getElementById('btn-pause-all').disabled = false;
+            } else {
+                sbStatus.textContent = data.total > 0 ? `Ready (${data.completed}/${data.total} completed)` : 'Ready';
+                document.getElementById('btn-pause-all').disabled = true;
+            }
+
+            // Calculate aggregate speed
+            let totalSpeedBytes = 0;
+            allTasks.forEach(t => {
+                if (['DOWNLOADING', 'CONNECTING'].includes(t.status) && t.speed && t.speed.includes('/s')) {
+                    const parts = t.speed.split(' ');
+                    const val = parseFloat(parts[0]);
+                    const unit = parts[1];
+                    if (!isNaN(val)) {
+                        if (unit.startsWith('KiB')) totalSpeedBytes += val * 1024;
+                        else if (unit.startsWith('MiB')) totalSpeedBytes += val * 1024 * 1024;
+                        else if (unit.startsWith('GiB')) totalSpeedBytes += val * 1024 * 1024 * 1024;
+                        else totalSpeedBytes += val;
+                    }
+                }
+            });
+
+            const speedText = totalSpeedBytes > 1024 * 1024
+                ? (totalSpeedBytes / (1024 * 1024)).toFixed(2) + ' MB/s'
+                : (totalSpeedBytes / 1024).toFixed(1) + ' KB/s';
+            document.getElementById('sb-speed-text').textContent = 'Total Speed: ' + speedText;
+
+            // In-place update grid
+            renderTasksGrid();
+
+        } catch (e) {
+            // Ignore temporary network interruptions
+        } finally {
+            isPolling = false;
+        }
+    }
+
+    // --- ACTIONS ---
+    async function startAllTasks() {
+        await fetch('/api/start_all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parallel: 4 }) });
+        fetchStatus();
+    }
+
+    async function pauseAllTasks() {
+        await fetch('/api/pause_all', { method: 'POST' });
+        fetchStatus();
+    }
+
+    async function removeCompletedTasks() {
+        await fetch('/api/remove_completed', { method: 'POST' });
+        fetchStatus();
+    }
+
+    async function clearAllTasks() {
+        if (confirm('Clear all tasks from the download list?')) {
+            await fetch('/api/clear_all', { method: 'POST' });
+            fetchStatus();
+        }
+    }
+
+    async function toggleTask(taskId, currentStatus) {
+        if (['DOWNLOADING', 'CONNECTING', 'QUEUED'].includes(currentStatus)) {
+            await fetch('/api/pause_task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }) });
+        } else {
+            await fetch('/api/resume_task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }) });
+        }
+        fetchStatus();
+    }
+
+    async function deleteTask(taskId) {
+        await fetch('/api/remove_task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }) });
+        fetchStatus();
+    }
+
+    async function openDownloadFolder() {
+        const folder = document.getElementById('composer-save-dir').value;
+        await fetch('/api/open_folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: folder }) });
+    }
+
+    async function openExcelTracker() {
+        const folder = document.getElementById('composer-save-dir').value;
+        await fetch('/api/open_tracker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: folder }) });
+    }
+
+    async function syncTrackerCloud() {
+        alert('Syncing Excel download history to GitHub cloud...');
+        const resp = await fetch('/api/sync_cloud', { method: 'POST' });
+        const data = await resp.json();
+        alert(data.message || (data.success ? 'Successfully synced to cloud!' : 'Sync notice: ' + (data.error || 'Done')));
+    }
+
+    // --- MODALS ---
+    function openLogsModal() {
+        document.getElementById('logs-modal').style.display = 'flex';
+        fetchLogs();
+    }
+    function closeLogsModal() { document.getElementById('logs-modal').style.display = 'none'; }
+
+    async function fetchLogs() {
+        const resp = await fetch('/api/logs');
+        const data = await resp.json();
+        const ta = document.getElementById('logs-textarea');
+        ta.value = (data.logs || []).join('\\n');
+        ta.scrollTop = ta.scrollHeight;
+    }
+
+    function copyLogs() {
+        const text = document.getElementById('logs-textarea').value;
+        navigator.clipboard.writeText(text);
+        alert('Logs copied to clipboard!');
+    }
+
+    function openUpdateModal() {
+        document.getElementById('update-modal').style.display = 'flex';
+        checkUpdates();
+    }
+    function closeUpdateModal() { document.getElementById('update-modal').style.display = 'none'; }
+
+    async function checkUpdates() {
+        const box = document.getElementById('update-status-box');
+        box.innerHTML = 'Checking GitHub releases for updates...';
+        try {
+            const resp = await fetch('/api/check_update');
+            const data = await resp.json();
+            if (data.has_update) {
+                box.innerHTML = `
+                    <strong style="color: #16a34a;">New Version Available: v${data.latest_version}</strong><br>
+                    <span style="color: #64748b;">Current version: ${data.current_version}</span><br>
+                    <button class="composer-btn" style="margin-top: 8px; background: #2563eb; color: white;" onclick="applyUpdate('${data.download_url}')">
+                        Download & Apply Update Automatically
+                    </button>
+                `;
+            } else {
+                box.innerHTML = `
+                    <strong style="color: #16a34a;">✓ Up to Date!</strong><br>
+                    You are running the latest version (${data.current_version || '1.0.0'}).
+                `;
+            }
+        } catch (e) {
+            box.innerHTML = 'Unable to check for updates: ' + e;
+        }
+    }
+
+    async function applyUpdate(url) {
+        if (!confirm('Download and apply update now? The app will close, update, and relaunch.')) return;
+        await fetch('/api/apply_update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ download_url: url }) });
+        alert('Update started in background. The app will relaunch in a moment.');
+    }
+
+    async function updateEngine() {
+        const box = document.getElementById('update-status-box');
+        box.innerHTML = 'Updating extraction algorithms from PyPI in background...';
+        const resp = await fetch('/api/update_engine', { method: 'POST' });
+        const data = await resp.json();
+        alert(data.message || (data.success ? 'Extraction engine updated successfully!' : 'Engine update status: ' + data.error));
+        box.innerHTML = data.message || 'Extractor updated.';
+    }
+
+    // --- SETUP LISTENERS ---
+    window.addEventListener('DOMContentLoaded', () => {
+        const textarea = document.getElementById('composer-urls-input');
+        if (textarea) {
+            textarea.addEventListener('paste', () => {
+                setTimeout(formatTextareaWithLineBreakers, 20);
+            });
+            textarea.addEventListener('input', updateComposerCount);
+        }
+
+        // Poll status every 1000ms
+        setInterval(fetchStatus, 1000);
+        fetchStatus();
+    });
+</script>
 </body>
 </html>
 """
+
+
+@app.route("/favicon.ico")
+def favicon():
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+    if os.path.isfile(icon_path):
+        return send_file(icon_path, mimetype="image/vnd.microsoft.icon")
+    return "", 204
 
 
 @app.route("/")
@@ -1330,13 +1138,13 @@ def start_all():
 
 
 @app.route("/api/pause_all", methods=["POST"])
-def pause_all_endpoint():
+def pause_all():
     downloader.pause_all()
     return jsonify({"success": True})
 
 
 @app.route("/api/cancel", methods=["POST"])
-def cancel_endpoint():
+def cancel_all():
     downloader.pause_all()
     return jsonify({"success": True})
 
@@ -1345,23 +1153,23 @@ def cancel_endpoint():
 def resume_task_endpoint():
     data = request.get_json() or {}
     task_id = int(data.get("task_id", 0))
-    resumed = downloader.resume_task(task_id)
-    return jsonify({"success": resumed})
+    res = downloader.resume_task(task_id)
+    return jsonify({"success": res})
 
 
 @app.route("/api/pause_task", methods=["POST"])
 def pause_task_endpoint():
     data = request.get_json() or {}
     task_id = int(data.get("task_id", 0))
-    paused = downloader.pause_task(task_id)
-    return jsonify({"success": paused})
+    res = downloader.pause_task(task_id)
+    return jsonify({"success": res})
 
 
 @app.route("/api/remove_task", methods=["POST"])
 def remove_task_endpoint():
     data = request.get_json() or {}
     task_id = int(data.get("task_id", 0))
-    downloader.remove_task(task_id)
+    downloader.delete_task(task_id)
     return jsonify({"success": True})
 
 
@@ -1512,7 +1320,7 @@ if __name__ == "__main__":
                 width=1240,
                 height=840,
                 min_size=(960, 600),
-                background_color="#0A0E17",
+                background_color="#FFFFFF",
             )
             opened_native = True
             webview.start()

@@ -575,7 +575,7 @@ class Downloader:
                                         "file_path": os.path.join(target_dir, task.filename) if task.filename else "",
                                     },
                                     save_dir=target_dir,
-                                    sync_cloud=True,
+                                    sync_cloud=False,
                                     log_callback=self.log,
                                 )
                                 self.log(f"[Task #{task.id}] [TRACKER] Logged metadata to Excel tracker: {tracker_file}")
