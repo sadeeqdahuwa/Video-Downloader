@@ -134,8 +134,13 @@ def download_and_apply_update(
         with urllib.request.urlopen(req, timeout=120) as resp, open(zip_dest, "wb") as f_out:
             shutil.copyfileobj(resp, f_out)
 
-        _log("Download complete. Extracting update archive...")
+        _log("Download complete. Extracting update archive safely...")
         with zipfile.ZipFile(zip_dest, "r") as zf:
+            target_base = os.path.abspath(extracted_dir)
+            for member in zf.infolist():
+                member_path = os.path.abspath(os.path.join(extracted_dir, member.filename))
+                if not member_path.startswith(target_base + os.sep) and member_path != target_base:
+                    raise ValueError(f"Unsafe path detected in update archive: {member.filename}")
             zf.extractall(extracted_dir)
 
         # Determine target application directory
@@ -176,8 +181,13 @@ chcp 65001 >nul
 echo =======================================================
 echo All Video Downloader Pro - Applying Automatic Update
 echo =======================================================
-echo Waiting for application (PID {pid}) to shut down...
-timeout /t 2 /nobreak >nul
+echo Waiting for application (PID {pid}) to completely close...
+:wait_loop
+tasklist /fi "pid eq {pid}" 2>nul | find "{pid}" >nul
+if %errorlevel% equ 0 (
+    timeout /t 1 /nobreak >nul
+    goto wait_loop
+)
 
 :: Overwrite files in target directory
 echo Copying new application files...
@@ -231,10 +241,23 @@ def update_extractor_engine(log_callback: Callable[[str], None] | None = None) -
         else:
             print(f"[EXTRACTOR] {msg}")
 
-    _log("Checking for upstream yt-dlp extractor definitions update...")
+    # Check if running from frozen executable
+    if getattr(sys, "frozen", False):
+        _log("In standalone (.exe) mode, video extractors are bundled into application updates.")
+        _log("Checking for upstream release package...")
+        update_info = check_for_app_updates()
+        if update_info.get("has_update"):
+            msg = f"New version v{update_info['latest_version']} is available with updated extractors! Click 'Check Now' to update."
+            _log(msg)
+            return {"success": True, "output": msg, "has_app_update": True}
+        else:
+            msg = f"Your application (v{update_info.get('current_version', '')}) has the latest built-in extraction algorithms."
+            _log(msg)
+            return {"success": True, "output": msg}
+
+    _log("Checking for upstream yt-dlp extractor definitions update via pip...")
 
     try:
-        # Check if running from python / venv
         python_exe = sys.executable
         res = subprocess.run(
             [python_exe, "-m", "pip", "install", "--upgrade", "yt-dlp"],

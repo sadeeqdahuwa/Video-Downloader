@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 _LOCK = threading.Lock()
+_GIT_LOCK = threading.Lock()
 
 EXCEL_FILENAME = "download_history.xlsx"
 CSV_FILENAME = "download_history.csv"
@@ -66,13 +67,17 @@ def _write_single_location(entry: dict[str, Any], target_dir: str, timestamp: st
         "File Path",
     ]
 
+    desc = str(entry.get("description", "") or "")
+    if len(desc) > 32000:
+        desc = desc[:32000] + "... [truncated]"
+
     row_data = [
         timestamp,
         entry.get("status", "COMPLETED"),
         entry.get("clean_title", ""),
         entry.get("filename", ""),
         entry.get("raw_title", ""),
-        entry.get("description", ""),
+        desc,
         entry.get("url", ""),
         entry.get("size", "—"),
         entry.get("duration", "—"),
@@ -194,43 +199,44 @@ def sync_tracker_to_cloud(log_callback: Callable[[str], None] | None = None) -> 
         else:
             print(f"[CLOUD SYNC] {msg}")
 
-    try:
-        os.makedirs(REPO_TRACKER_DIR, exist_ok=True)
-        # Check if git is available
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "tracker/"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-        )
+    with _GIT_LOCK:
+        try:
+            os.makedirs(REPO_TRACKER_DIR, exist_ok=True)
+            # Check if git is available
+            status = subprocess.run(
+                ["git", "status", "--porcelain", "tracker/"],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+            )
 
-        if not status.stdout.strip():
-            _log("Tracker spreadsheets are already up to date on GitHub cloud.")
-            return {"success": True, "message": "Already up to date"}
+            if not status.stdout.strip():
+                _log("Tracker spreadsheets are already up to date on GitHub cloud.")
+                return {"success": True, "message": "Already up to date"}
 
-        # Stage tracker files
-        subprocess.run(["git", "add", "tracker/"], cwd=PROJECT_ROOT, check=True)
+            # Stage tracker files
+            subprocess.run(["git", "add", "tracker/"], cwd=PROJECT_ROOT, check=True)
 
-        # Commit
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        commit_msg = f"tracker: sync download history to cloud ({now_str})"
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=PROJECT_ROOT, check=True)
+            # Commit
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            commit_msg = f"tracker: sync download history to cloud ({now_str})"
+            subprocess.run(["git", "commit", "-m", commit_msg], cwd=PROJECT_ROOT, check=True)
 
-        # Push to origin main
-        push_res = subprocess.run(
-            ["git", "push", "origin", "main"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-        )
+            # Push to origin main
+            push_res = subprocess.run(
+                ["git", "push", "origin", "main"],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+            )
 
-        if push_res.returncode == 0:
-            _log(f"Successfully pushed Excel and CSV trackers to GitHub cloud ({now_str})")
-            return {"success": True, "message": "Pushed to GitHub cloud"}
-        else:
-            _log(f"Git push warning: {push_res.stderr.strip()}")
-            return {"success": False, "error": push_res.stderr.strip()}
+            if push_res.returncode == 0:
+                _log(f"Successfully pushed Excel and CSV trackers to GitHub cloud ({now_str})")
+                return {"success": True, "message": "Pushed to GitHub cloud"}
+            else:
+                _log(f"Git push warning: {push_res.stderr.strip()}")
+                return {"success": False, "error": push_res.stderr.strip()}
 
-    except Exception as e:
-        _log(f"Failed to sync to GitHub cloud: {e}")
-        return {"success": False, "error": str(e)}
+        except Exception as e:
+            _log(f"Failed to sync to GitHub cloud: {e}")
+            return {"success": False, "error": str(e)}

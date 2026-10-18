@@ -50,6 +50,33 @@ else:
         pass
 
 
+from enum import Enum, auto
+
+
+class DownloadStatus(Enum):
+    IDLE = auto()
+    FETCHING_INFO = auto()
+    DOWNLOADING = auto()
+    POST_PROCESSING = auto()
+    COMPLETED = auto()
+    CANCELLED = auto()
+    ERROR = auto()
+
+
+@dataclass
+class ProgressInfo:
+    status: DownloadStatus = DownloadStatus.IDLE
+    percent: float = 0.0
+    speed: str = "—"
+    eta: str = "—"
+    total_bytes: str = "—"
+    downloaded_bytes: str = "—"
+    title: str = ""
+    error_message: str = ""
+    playlist_index: int = 0
+    playlist_count: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Individual Task Progress Structure
 # ---------------------------------------------------------------------------
@@ -175,12 +202,14 @@ class Downloader:
     with robust Start All, Pause All, Resume, and Task List persistence.
     """
 
-    def __init__(self, max_parallel: int = 4):
+    def __init__(self, max_parallel: int = 4, progress_callback: Callable[[ProgressInfo], None] | None = None):
         self.default_parallel = max_parallel
+        self.progress_callback = progress_callback
         self.tasks: list[TaskProgress] = []
         self.logs: list[str] = []
-        self._log_file = "downloader.log"
+        self._log_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloader.log")
         self._lock = threading.Lock()
+        self._log_lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._paused_task_ids: set[int] = set()
         self._manager_thread: threading.Thread | None = None
@@ -197,11 +226,12 @@ class Downloader:
             self.logs.append(entry)
             if len(self.logs) > 600:
                 self.logs.pop(0)
-        try:
-            with open(self._log_file, "a", encoding="utf-8") as f:
-                f.write(entry + "\n")
-        except Exception:
-            pass
+        with self._log_lock:
+            try:
+                with open(self._log_file, "a", encoding="utf-8") as f:
+                    f.write(entry + "\n")
+            except Exception:
+                pass
 
     def get_logs(self) -> list[str]:
         """Return a copy of recent log messages."""
@@ -445,6 +475,20 @@ class Downloader:
                     if current_title:
                         task.title = current_title
 
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(ProgressInfo(
+                            status=DownloadStatus.DOWNLOADING if raw_status == "downloading" else DownloadStatus.POST_PROCESSING,
+                            percent=task.percent,
+                            speed=task.speed,
+                            eta=task.eta,
+                            total_bytes=task.total_bytes,
+                            downloaded_bytes=task.downloaded_bytes,
+                            title=task.title,
+                        ))
+                    except Exception:
+                        pass
+
             def postprocessor_hook(d: dict[str, Any]) -> None:
                 if self._cancel_event.is_set() or task.id in self._paused_task_ids:
                     raise yt_dlp.utils.DownloadCancelled("User paused")
@@ -537,6 +581,15 @@ class Downloader:
                                 self.log(f"[Task #{task.id}] [TRACKER] Logged metadata to Excel tracker: {tracker_file}")
                             except Exception as te:
                                 self.log(f"[Task #{task.id}] [TRACKER ERROR] Failed to write Excel tracker: {te}")
+                            if self.progress_callback:
+                                try:
+                                    self.progress_callback(ProgressInfo(
+                                        status=DownloadStatus.COMPLETED,
+                                        title=task.title,
+                                        percent=100.0,
+                                    ))
+                                except Exception:
+                                    pass
                         else:
                             task.status = "PAUSED"
                     break
@@ -545,6 +598,14 @@ class Downloader:
                     with self._lock:
                         task.status = "PAUSED"
                         self.log(f"[Task #{task.id}] Download paused.")
+                    if self.progress_callback:
+                        try:
+                            self.progress_callback(ProgressInfo(
+                                status=DownloadStatus.CANCELLED,
+                                title=task.title,
+                            ))
+                        except Exception:
+                            pass
                     break
                 except Exception as e:
                     if attempt < max_auto_retries and not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
@@ -558,6 +619,15 @@ class Downloader:
                             task.status = "ERROR"
                             task.error_message = str(e)
                         self.log(f"[Task #{task.id}] [ERROR] {e}")
+                        if self.progress_callback:
+                            try:
+                                self.progress_callback(ProgressInfo(
+                                    status=DownloadStatus.ERROR,
+                                    error_message=str(e),
+                                    title=task.title,
+                                ))
+                            except Exception:
+                                pass
 
         workers_count = max(1, min(max_parallel, len(tasks_to_run)))
         with ThreadPoolExecutor(max_workers=workers_count) as executor:

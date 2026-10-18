@@ -516,9 +516,19 @@ HTML_TEMPLATE = """
         renderGrid(taskList);
     }
 
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     async function submitDownloads() {
         const text = document.getElementById('modal-urls-input').value;
-        const urls = text.split('\n').map(s => s.trim()).filter(s => s.length > 0 && s.startsWith('http'));
+        const urls = text.split('\n').map(s => s.trim()).filter(s => s.length > 0 && s.toLowerCase().startsWith('http'));
 
         if (urls.length === 0) {
             alert('Please paste at least one valid video URL starting with http/https.');
@@ -634,12 +644,17 @@ HTML_TEMPLATE = """
 
         container.innerHTML = '';
         filtered.forEach(task => {
-            const isAudio = task.title.toLowerCase().endsWith('.mp3');
-            const badgeText = isAudio ? 'MP3' : 'HD 1080';
+            const isAudio = task.title.toLowerCase().endsWith('.mp3') || (task.format_str && task.format_str.includes('audio') && !task.format_str.includes('video'));
+            const badgeText = isAudio ? 'MP3' : 'HD';
             const rowClass = task.status === 'DOWNLOADING' ? 'grid-item-row selected' : 'grid-item-row';
             const sizeDisplay = (task.downloaded_bytes !== '—' && task.total_bytes !== '—') 
                 ? `${task.downloaded_bytes} / ${task.total_bytes}` 
                 : (task.total_bytes !== '—' ? task.total_bytes : '—');
+
+            const safeUrl = escapeHtml(task.url);
+            const safeTitle = escapeHtml(task.title);
+            const safeDir = (task.save_dir || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const formatDisplay = isAudio ? 'Audio Only' : 'Best Quality';
 
             let actionBtnHtml = '';
             if (['DOWNLOADING', 'CONNECTING', 'POST_PROCESSING'].includes(task.status) || task.status.startsWith('AUTO-RESUMING')) {
@@ -647,12 +662,13 @@ HTML_TEMPLATE = """
             } else if (['PAUSED', 'CANCELLED', 'ERROR', 'QUEUED'].includes(task.status)) {
                 actionBtnHtml = `<button class="cell-sub-btn" style="color: #0066cc; font-weight: 600;" onclick="resumeTask(${task.id})">Resume</button>`;
             } else if (task.status === 'COMPLETED') {
-                actionBtnHtml = `<button class="cell-sub-btn" style="color: #0e8a16; font-weight: 600;" onclick="openFolder('${(task.save_dir || '').replace(/\\/g, '\\\\')}')">Open Folder</button>`;
+                actionBtnHtml = `<button class="cell-sub-btn" style="color: #0e8a16; font-weight: 600;" onclick="openFolder('${safeDir}')">Open Folder</button>`;
             }
 
             const statusText = task.status === 'DOWNLOADING' 
                 ? `Downloading: ${task.speed}` 
                 : (task.status === 'POST_PROCESSING' ? 'Processing...' : (task.error_message ? `Error: ${task.error_message}` : task.status));
+            const safeStatus = escapeHtml(statusText);
 
             const row = document.createElement('div');
             row.className = rowClass;
@@ -670,28 +686,28 @@ HTML_TEMPLATE = """
 
                 <!-- Source -->
                 <div class="cell-source">
-                    <span class="source-text" title="${task.url}">${task.url}</span>
-                    <button class="cell-sub-btn" onclick="window.open('${task.url}', '_blank')">Browse</button>
+                    <span class="source-text" title="${safeUrl}">${safeUrl}</span>
+                    <button class="cell-sub-btn" onclick="window.open('${safeUrl}', '_blank')">Browse</button>
                 </div>
 
                 <!-- Destination -->
                 <div class="cell-dest">
-                    <span class="dest-title" title="${task.title}">${task.title}</span>
-                    <button class="cell-sub-btn" onclick="openFolder('${(task.save_dir || '').replace(/\\/g, '\\\\')}')">Folder</button>
+                    <span class="dest-title" title="${safeTitle}">${safeTitle}</span>
+                    <button class="cell-sub-btn" onclick="openFolder('${safeDir}')">Folder</button>
                 </div>
 
                 <!-- Quality -->
-                <div style="font-size: 11px; color: #444444;">${document.getElementById('modal-quality-select').value}</div>
+                <div style="font-size: 11px; color: #444444;">${formatDisplay}</div>
 
                 <!-- Size -->
                 <div class="cell-size">
-                    <span>${sizeDisplay}</span>
+                    <span>${escapeHtml(sizeDisplay)}</span>
                 </div>
 
                 <!-- Status -->
                 <div class="cell-status-wrap">
                     <span class="cell-close-btn" title="Remove Task" onclick="removeTask(${task.id})">✕</span>
-                    <span class="status-speed-label" title="${statusText}">${statusText}</span>
+                    <span class="status-speed-label" title="${safeStatus}">${safeStatus}</span>
                     <div class="big-percent-label">${task.percent}%</div>
                     <div style="margin-top: 2px;">
                         ${actionBtnHtml}
@@ -1011,6 +1027,17 @@ def open_folder_endpoint():
     folder = data.get("folder", "").strip() or get_default_download_dir()
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True)
+    if sys.platform == "win32":
+        try:
+            os.startfile(folder)
+        except Exception as e:
+            return jsonify({"error": f"Could not open folder: {e}"}), 500
+    elif sys.platform == "darwin":
+        import subprocess
+        subprocess.run(["open", folder])
+    else:
+        import subprocess
+        subprocess.run(["xdg-open", folder])
     return jsonify({"success": True})
 
 
