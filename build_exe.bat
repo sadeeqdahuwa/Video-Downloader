@@ -20,6 +20,19 @@ if %ERRORLEVEL% EQU 0 (
     echo  Output folder: dist\StreamVaultPro\
     echo  Executable:    dist\StreamVaultPro\StreamVaultPro.exe
     echo ========================================================
+    echo.
+    set ISCC_PATH=""
+    if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set ISCC_PATH="%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+    if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set ISCC_PATH="%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+    if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set ISCC_PATH="%ProgramFiles%\Inno Setup 6\ISCC.exe"
+
+    if not %ISCC_PATH%=="" (
+        echo Compiling Windows Installer (StreamVaultPro_Setup.exe)...
+        %ISCC_PATH% installer.iss
+        echo ========================================================
+        echo  Installer created at: dist_installer\StreamVaultPro_Setup.exe
+        echo ========================================================
+    )
 ) else (
     echo.
     echo [ERROR] Build failed. Please check the logs above.
