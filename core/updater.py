@@ -34,7 +34,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/release
 
 def _get_auth_headers(token: str | None = None) -> dict[str, str]:
     headers = {
-        "User-Agent": "AllVideoDownloaderPro-Updater",
+        "User-Agent": "StreamVaultPro-Updater",
         "Accept": "application/vnd.github.v3+json",
     }
     gh_token = token or os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -115,7 +115,7 @@ def download_and_apply_update(
 
     try:
         _log(f"Downloading update package from {download_url}...")
-        temp_dir = os.path.join(tempfile.gettempdir(), "AllVideoDownloaderPro_Update")
+        temp_dir = os.path.join(tempfile.gettempdir(), "StreamVaultPro_Update")
         if os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
@@ -180,7 +180,7 @@ def download_and_apply_update(
         bat_content = f"""@echo off
 chcp 65001 >nul
 echo =======================================================
-echo All Video Downloader Pro - Applying Automatic Update
+echo StreamVault Pro - Applying Automatic Update
 echo =======================================================
 echo Waiting for application (PID {pid}) to completely close...
 :wait_loop
@@ -194,7 +194,7 @@ if %errorlevel% equ 0 (
 echo Copying new application files...
 xcopy /s /e /y /q "{source_dir}\\*" "{target_app_dir}\\"
 
-echo Relaunching All Video Downloader Pro...
+echo Relaunching StreamVault Pro...
 {relaunch_cmd}
 
 :: Clean up updater folder after short delay

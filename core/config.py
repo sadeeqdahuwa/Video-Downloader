@@ -5,6 +5,7 @@ Default paths, preferences, and constants for the Video Downloader app.
 """
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -78,6 +79,10 @@ def find_ffmpeg() -> str | None:
         os.path.join(current_dir, "_internal", "ffmpeg.exe"),
         os.path.join(app_dir, "_internal", "ffmpeg.exe"),
     ]
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        local_candidates.insert(0, os.path.join(exe_dir, "ffmpeg.exe"))
+        local_candidates.insert(1, os.path.join(exe_dir, "_internal", "ffmpeg.exe"))
     for c in local_candidates:
         if os.path.isfile(c):
             return c
