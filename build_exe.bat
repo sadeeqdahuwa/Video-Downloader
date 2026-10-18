@@ -12,6 +12,8 @@ if %ERRORLEVEL% EQU 0 (
         echo Bundling portable ffmpeg.exe into dist directory...
         copy /y "ffmpeg.exe" "dist\StreamVaultPro\ffmpeg.exe" >nul
     )
+    echo Stripping redundant .py source files to prevent Windows Defender locks...
+    powershell -NoProfile -Command "Get-ChildItem -Path 'dist\StreamVaultPro' -Recurse -Filter '*.py' | Remove-Item -Force"
     echo.
     echo ========================================================
     echo  Build Successful!
