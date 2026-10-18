@@ -419,11 +419,13 @@ HTML_TEMPLATE = """
                     <button class="paste-btn-inside" onclick="pasteClipboardSingle()">Paste</button>
                 </div>
 
-                <select id="quick-quality-select" class="select-pill">
-                    <option value="Best Quality" selected>Best Quality (1080p / 4K)</option>
-                    <option value="720p">HD 720p</option>
-                    <option value="480p">SD 480p</option>
-                    <option value="Audio Only">Audio Only (MP3 320k)</option>
+                <select id="quick-quality-select" class="select-pill" title="Video Quality Preset">
+                    <option value="Best Quality" selected>⭐ Best (Original Upload Quality)</option>
+                    <option value="1080p">1080p (Full HD Cap)</option>
+                    <option value="720p">720p (HD Cap)</option>
+                    <option value="480p">480p (Standard)</option>
+                    <option value="360p">360p (Data Saver / Mobile)</option>
+                    <option value="Audio Only">🎵 Audio Only (MP3 / M4A)</option>
                 </select>
 
                 <select id="quick-concurrency-select" class="select-pill" title="Parallel simultaneous downloads">
@@ -438,17 +440,27 @@ HTML_TEMPLATE = """
                     <span>Download</span>
                 </button>
 
-                <button class="btn-batch-toggle" id="btn-batch-toggle" onclick="toggleBatchDrawer()">
-                    <span>Batch (+)</span>
+                <button class="btn-batch-toggle" id="btn-batch-toggle" onclick="toggleBatchDrawer()" title="Expand multi-link batch paste drawer">
+                    <span>Batch Queue (+)</span>
                 </button>
             </div>
 
             <!-- Batch Drawer -->
             <div class="batch-drawer" id="batch-drawer">
-                <textarea id="batch-urls-input" class="batch-textarea" placeholder="Paste multiple video URLs here (one URL per line)..."></textarea>
-                <div style="display: flex; justify-content: flex-end; gap: 8px;">
-                    <button class="btn-ctrl ghost" onclick="toggleBatchDrawer()">Collapse</button>
-                    <button class="btn-download-primary" style="height: 34px; padding: 0 14px; font-size: 12px;" onclick="submitBatchDownload()">Start Batch Download</button>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Multi-Link Batch Queue (One link per line)</span>
+                    <span id="batch-link-count" style="font-size: 11px; color: #64748b; font-weight: 600;">0 links detected</span>
+                </div>
+                <textarea id="batch-urls-input" class="batch-textarea" placeholder="Paste multiple video URLs here (one URL per line)...&#10;Paste from clipboard or text: links will automatically be split line-by-line with breakers!"></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-ctrl" style="height: 32px; font-size: 11px; padding: 0 12px; background: #1e293b; color: #38bdf8;" onclick="pasteClipboardToBatch()">📋 Paste Clipboard</button>
+                        <button class="btn-ctrl ghost" style="height: 32px; font-size: 11px; padding: 0 10px;" onclick="clearBatchTextarea()">Clear</button>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-ctrl ghost" style="height: 32px; font-size: 11px;" onclick="toggleBatchDrawer()">Collapse</button>
+                        <button class="btn-download-primary" style="height: 34px; padding: 0 16px; font-size: 12px;" onclick="submitBatchDownload()">Start Batch Download</button>
+                    </div>
                 </div>
             </div>
 
@@ -460,8 +472,9 @@ HTML_TEMPLATE = """
                     <span class="text-action-link" onclick="promptChangeFolder()">Change</span>
                     <span class="text-action-link" onclick="openFolder(currentSaveDir)">Open</span>
                 </div>
-                <div>
-                    <span>✨ Facebook metric & emoji counter stripper: <strong>Active</strong></span>
+                <div style="display: flex; gap: 14px; font-size: 11px; color: #94a3b8; flex-wrap: wrap;">
+                    <span>🎯 <strong>Quality:</strong> Native uploaded resolution (360p, 720p, etc.) preserved without upscaling</span>
+                    <span>✨ <strong>Cleaner:</strong> Metric & reaction stripper active</span>
                 </div>
             </div>
         </section>
@@ -618,15 +631,106 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function pasteClipboardSingle() {
-            if (navigator.clipboard && navigator.clipboard.readText) {
-                try {
-                    const text = await navigator.clipboard.readText();
-                    if (text) {
-                        document.getElementById('single-url-input').value = text.trim();
-                    }
-                } catch(e) {}
+        function extractUrls(text) {
+            if (!text) return [];
+            // Match any http:// or https:// URL, stopping at whitespace, quotes, or angle brackets
+            const regex = /https?:\/\/[^\s"',<>\u3000]+/gi;
+            const matches = text.match(regex);
+            if (matches && matches.length > 0) {
+                // Strip trailing punctuation like . , ; : ) ] }
+                const cleaned = matches.map(u => u.replace(/[.,;:\)\]\}]+$/, '')).filter(u => u.length > 8);
+                return Array.from(new Set(cleaned));
             }
+            // Fallback: split by newlines, carriage returns, or spaces
+            const parts = text.split(/[\r\n\s,;]+/);
+            return Array.from(new Set(parts.map(s => s.trim()).filter(s => s.length > 8 && s.toLowerCase().startsWith('http'))));
+        }
+
+        function updateBatchCounter() {
+            const text = document.getElementById('batch-urls-input').value;
+            const urls = extractUrls(text);
+            const countEl = document.getElementById('batch-link-count');
+            if (countEl) {
+                countEl.innerText = urls.length === 1 ? '1 link detected' : `${urls.length} links detected`;
+                countEl.style.color = urls.length > 0 ? '#10b981' : '#64748b';
+            }
+        }
+
+        function openBatchWithUrls(urls) {
+            const drawer = document.getElementById('batch-drawer');
+            const btn = document.getElementById('btn-batch-toggle');
+            drawer.style.display = 'flex';
+            btn.style.color = '#38bdf8';
+
+            const area = document.getElementById('batch-urls-input');
+            const existing = extractUrls(area.value);
+            const merged = Array.from(new Set([...existing, ...urls]));
+            area.value = merged.join('\n');
+            updateBatchCounter();
+            area.focus();
+
+            // Clear the single input so there's no confusion
+            document.getElementById('single-url-input').value = '';
+        }
+
+        async function pasteClipboardSingle() {
+            try {
+                let text = '';
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    text = await navigator.clipboard.readText();
+                } else {
+                    text = prompt("Paste your video link(s) here:");
+                }
+                if (!text) return;
+
+                const urls = extractUrls(text);
+                if (urls.length > 1) {
+                    openBatchWithUrls(urls);
+                } else if (urls.length === 1) {
+                    document.getElementById('single-url-input').value = urls[0];
+                } else {
+                    document.getElementById('single-url-input').value = text.trim();
+                }
+            } catch(e) {
+                const text = prompt("Paste your video link(s) here:");
+                if (text) {
+                    const urls = extractUrls(text);
+                    if (urls.length > 1) openBatchWithUrls(urls);
+                    else if (urls.length === 1) document.getElementById('single-url-input').value = urls[0];
+                    else document.getElementById('single-url-input').value = text.trim();
+                }
+            }
+        }
+
+        async function pasteClipboardToBatch() {
+            try {
+                let text = '';
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    text = await navigator.clipboard.readText();
+                } else {
+                    text = prompt("Paste your multiple video links here:");
+                }
+                if (!text) return;
+                const urls = extractUrls(text);
+                if (urls.length > 0) {
+                    openBatchWithUrls(urls);
+                } else {
+                    const area = document.getElementById('batch-urls-input');
+                    area.value = area.value ? (area.value + '\n' + text.trim()) : text.trim();
+                    updateBatchCounter();
+                }
+            } catch(e) {
+                const text = prompt("Paste your multiple video links here:");
+                if (text) {
+                    const urls = extractUrls(text);
+                    if (urls.length > 0) openBatchWithUrls(urls);
+                }
+            }
+        }
+
+        function clearBatchTextarea() {
+            document.getElementById('batch-urls-input').value = '';
+            updateBatchCounter();
         }
 
         function promptChangeFolder() {
@@ -648,8 +752,9 @@ HTML_TEMPLATE = """
 
         async function submitQuickDownload() {
             const urlInput = document.getElementById('single-url-input');
-            const url = urlInput.value.trim();
-            if (!url || !url.toLowerCase().startsWith('http')) {
+            const rawVal = urlInput.value.trim();
+            const urls = extractUrls(rawVal);
+            if (urls.length === 0) {
                 alert('Please enter or paste a valid video URL starting with http:// or https://');
                 urlInput.focus();
                 return;
@@ -659,12 +764,13 @@ HTML_TEMPLATE = """
             const parallel = parseInt(document.getElementById('quick-concurrency-select').value) || 4;
 
             urlInput.value = '';
-            await sendDownloadRequest([url], quality, parallel);
+            // If multiple links were present, queue all of them!
+            await sendDownloadRequest(urls, quality, parallel);
         }
 
         async function submitBatchDownload() {
             const text = document.getElementById('batch-urls-input').value;
-            const urls = text.split('\\n').map(s => s.trim()).filter(s => s.length > 0 && s.toLowerCase().startsWith('http'));
+            const urls = extractUrls(text);
 
             if (urls.length === 0) {
                 alert('Please paste at least one valid video URL starting with http:// or https://');
@@ -675,6 +781,7 @@ HTML_TEMPLATE = """
             const parallel = parseInt(document.getElementById('quick-concurrency-select').value) || 4;
 
             document.getElementById('batch-urls-input').value = '';
+            updateBatchCounter();
             toggleBatchDrawer();
             await sendDownloadRequest(urls, quality, parallel);
         }
@@ -1068,8 +1175,38 @@ HTML_TEMPLATE = """
             } catch(e) {}
         }
 
-        // Start auto polling as soon as DOM loads
-        window.addEventListener('DOMContentLoaded', startPolling);
+        // Start auto polling and attach paste handlers
+        window.addEventListener('DOMContentLoaded', () => {
+            startPolling();
+
+            const singleInput = document.getElementById('single-url-input');
+            if (singleInput) {
+                singleInput.addEventListener('paste', function(e) {
+                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
+                    const urls = extractUrls(pasted);
+                    if (urls.length > 1) {
+                        e.preventDefault();
+                        openBatchWithUrls(urls);
+                    }
+                });
+            }
+
+            const batchInput = document.getElementById('batch-urls-input');
+            if (batchInput) {
+                batchInput.addEventListener('paste', function(e) {
+                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
+                    const urls = extractUrls(pasted);
+                    if (urls.length > 0) {
+                        e.preventDefault();
+                        const existing = extractUrls(batchInput.value);
+                        const merged = Array.from(new Set([...existing, ...urls]));
+                        batchInput.value = merged.join('\n');
+                        updateBatchCounter();
+                    }
+                });
+                batchInput.addEventListener('input', updateBatchCounter);
+            }
+        });
     </script>
 </body>
 </html>
