@@ -208,8 +208,8 @@ class Downloader:
         self.tasks: list[TaskProgress] = []
         self.logs: list[str] = []
         self._log_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloader.log")
-        self._lock = threading.Lock()
-        self._log_lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._log_lock = threading.RLock()
         self._cancel_event = threading.Event()
         self._paused_task_ids: set[int] = set()
         self._manager_thread: threading.Thread | None = None
@@ -222,11 +222,10 @@ class Downloader:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         entry = f"[{timestamp}] {msg}"
         print(entry)
-        with self._lock:
+        with self._log_lock:
             self.logs.append(entry)
             if len(self.logs) > 600:
                 self.logs.pop(0)
-        with self._log_lock:
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
                     f.write(entry + "\n")
@@ -235,7 +234,7 @@ class Downloader:
 
     def get_logs(self) -> list[str]:
         """Return a copy of recent log messages."""
-        with self._lock:
+        with self._log_lock:
             return list(self.logs)
 
     def fetch_info(self, url: str) -> dict[str, Any]:
@@ -282,10 +281,18 @@ class Downloader:
         max_parallel: int = 4,
     ) -> None:
         """Add new URLs to the queue and begin processing."""
+        def _normalize(u: str) -> str:
+            u = u.strip().strip("'\"[]() ;,")
+            if u and not u.startswith("http://") and not u.startswith("https://"):
+                if u.startswith("www.") or any(d in u.lower() for d in ("facebook.com", "fb.watch", "youtube.com", "youtu.be", "instagram.com", "tiktok.com", "twitter.com", "x.com")):
+                    u = "https://" + u
+            return u
+
         if isinstance(urls, str):
-            url_list = [line.strip() for line in urls.strip().splitlines() if line.strip() and line.strip().startswith("http")]
+            raw_lines = [_normalize(line) for line in urls.strip().splitlines()]
+            url_list = [l for l in raw_lines if l and (l.startswith("http://") or l.startswith("https://"))]
         else:
-            url_list = [u.strip() for u in urls if u and u.strip() and u.strip().startswith("http")]
+            url_list = [_normalize(u) for u in urls if u and (_normalize(u).startswith("http://") or _normalize(u).startswith("https://"))]
 
         if not url_list:
             raise ValueError("No valid URLs provided to download.")
@@ -554,50 +561,55 @@ class Downloader:
                         self.log(f"[Task #{task.id}] Starting extraction & download for {task.url}")
                         ydl.download([task.url])
 
+                    is_completed = False
                     with self._lock:
                         if not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
                             task.status = "COMPLETED"
                             task.percent = 100.0
-                            self.log(f"[Task #{task.id}] [SUCCESS] Download finished: {task.title}")
-                            target_dir = task.save_dir or get_default_download_dir()
-                            try:
-                                tracker_file = record_download_history(
-                                    {
-                                        "status": "COMPLETED",
-                                        "clean_title": task.title,
-                                        "filename": task.filename,
-                                        "raw_title": task.raw_title or task.title,
-                                        "description": task.description,
-                                        "url": task.url,
-                                        "size": task.total_bytes,
-                                        "duration": task.duration_str,
-                                        "format": task.format_str,
-                                        "file_path": os.path.join(target_dir, task.filename) if task.filename else "",
-                                    },
-                                    save_dir=target_dir,
-                                    sync_cloud=False,
-                                    log_callback=self.log,
-                                )
-                                self.log(f"[Task #{task.id}] [TRACKER] Logged metadata to Excel tracker: {tracker_file}")
-                            except Exception as te:
-                                self.log(f"[Task #{task.id}] [TRACKER ERROR] Failed to write Excel tracker: {te}")
-                            if self.progress_callback:
-                                try:
-                                    self.progress_callback(ProgressInfo(
-                                        status=DownloadStatus.COMPLETED,
-                                        title=task.title,
-                                        percent=100.0,
-                                    ))
-                                except Exception:
-                                    pass
+                            is_completed = True
                         else:
                             task.status = "PAUSED"
+
+                    if is_completed:
+                        self.log(f"[Task #{task.id}] [SUCCESS] Download finished: {task.title}")
+                        target_dir = task.save_dir or get_default_download_dir()
+                        try:
+                            tracker_file = record_download_history(
+                                {
+                                    "status": "COMPLETED",
+                                    "clean_title": task.title,
+                                    "filename": task.filename,
+                                    "raw_title": task.raw_title or task.title,
+                                    "description": task.description,
+                                    "url": task.url,
+                                    "size": task.total_bytes,
+                                    "duration": task.duration_str,
+                                    "format": task.format_str,
+                                    "file_path": os.path.join(target_dir, task.filename) if task.filename else "",
+                                },
+                                save_dir=target_dir,
+                                sync_cloud=False,
+                                log_callback=self.log,
+                            )
+                            self.log(f"[Task #{task.id}] [TRACKER] Logged metadata to Excel tracker: {tracker_file}")
+                        except Exception as te:
+                            self.log(f"[Task #{task.id}] [TRACKER ERROR] Failed to write Excel tracker: {te}")
+
+                        if self.progress_callback:
+                            try:
+                                self.progress_callback(ProgressInfo(
+                                    status=DownloadStatus.COMPLETED,
+                                    title=task.title,
+                                    percent=100.0,
+                                ))
+                            except Exception:
+                                pass
                     break
 
                 except yt_dlp.utils.DownloadCancelled:
                     with self._lock:
                         task.status = "PAUSED"
-                        self.log(f"[Task #{task.id}] Download paused.")
+                    self.log(f"[Task #{task.id}] Download paused.")
                     if self.progress_callback:
                         try:
                             self.progress_callback(ProgressInfo(

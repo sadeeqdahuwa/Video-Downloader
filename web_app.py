@@ -674,9 +674,11 @@ HTML_TEMPLATE = """
     // Every single URL is extracted and formatted onto its own line with \n!
     function extractUrls(text) {
         if (!text) return [];
+        // Auto-prefix domains without protocol
+        let normalized = text.replace(/(^|[\\s,;])((?:www\\.|facebook\\.com|fb\\.watch|youtube\\.com|youtu\\.be|instagram\\.com|tiktok\\.com|twitter\\.com|x\\.com)[^\\s"',<>\\u3000]+)/gi, '$1https://$2');
         const regex = /https?:\\/\\/[^\\s"',<>\\u3000]+/gi;
-        const matches = text.match(regex) || [];
-        return Array.from(new Set(matches.map(u => u.trim())));
+        const matches = normalized.match(regex) || [];
+        return Array.from(new Set(matches.map(u => u.trim().replace(/[)\\]'",;]+$/, '')))).filter(u => u.length > 10);
     }
 
     function updateComposerCount() {
