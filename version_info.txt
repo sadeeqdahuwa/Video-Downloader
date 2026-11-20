@@ -4,8 +4,8 @@
 # http://msdn.microsoft.com/en-us/library/ms646997.aspx
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 1, 0),
-    prodvers=(1, 0, 1, 0),
+    filevers=(1, 0, 2, 0),
+    prodvers=(1, 0, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -20,12 +20,12 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'StreamVault Team'),
         StringStruct('FileDescription', 'StreamVault Pro - High-Speed Video Downloader & Archiver'),
-        StringStruct('FileVersion', '1.0.1.0'),
+        StringStruct('FileVersion', '1.0.2.0'),
         StringStruct('InternalName', 'StreamVaultPro'),
         StringStruct('LegalCopyright', 'Copyright (C) 2026 StreamVault Team. All rights reserved.'),
         StringStruct('OriginalFilename', 'StreamVaultPro.exe'),
         StringStruct('ProductName', 'StreamVault Pro'),
-        StringStruct('ProductVersion', '1.0.1.0')])
+        StringStruct('ProductVersion', '1.0.2.0')])
       ]), 
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

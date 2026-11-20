@@ -22,6 +22,18 @@ from typing import Any, Callable
 import yt_dlp
 
 import datetime
+import os
+import sys
+
+# Ensure UTF-8 output encoding across Windows subshells and consoles
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from core.config import APP_NAME, DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir
 from core.history_tracker import get_tracker_path, record_download_history
 from core.title_sanitizer import sanitize_title
@@ -176,8 +188,10 @@ def _format_speed(bps: float | None) -> str:
 
 
 class _YDLLogger:
-    def __init__(self, log_callback: Callable[[str], None] | None = None):
+    def __init__(self, log_callback: Callable[[str], None] | None = None, task: TaskProgress | None = None):
         self.log_callback = log_callback
+        self.task = task
+        self.last_error = ""
 
     def debug(self, msg: str) -> None:
         if self.log_callback and any(msg.startswith(p) for p in ("[download]", "[Merger]", "[ExtractAudio]", "[ffmpeg]")):
@@ -188,8 +202,12 @@ class _YDLLogger:
             self.log_callback(f"[WARN] {msg}")
 
     def error(self, msg: str) -> None:
+        self.last_error = msg
+        clean_msg = msg.replace("ERROR: ", "").strip()
+        if self.task:
+            self.task.error_message = clean_msg
         if self.log_callback:
-            self.log_callback(f"[ERROR] {msg}")
+            self.log_callback(f"[ERROR] {clean_msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -221,13 +239,20 @@ class Downloader:
         """Record a timestamped log line to memory, stdout, and downloader.log file."""
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         entry = f"[{timestamp}] {msg}"
-        print(entry)
+        try:
+            print(entry)
+        except Exception:
+            try:
+                enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+                print(entry.encode(enc, errors="replace").decode(enc, errors="replace"))
+            except Exception:
+                pass
         with self._log_lock:
             self.logs.append(entry)
             if len(self.logs) > 600:
                 self.logs.pop(0)
             try:
-                with open(self._log_file, "a", encoding="utf-8") as f:
+                with open(self._log_file, "a", encoding="utf-8", errors="replace") as f:
                     f.write(entry + "\n")
             except Exception:
                 pass
@@ -504,6 +529,12 @@ class Downloader:
                     with self._lock:
                         task.status = "POST_PROCESSING"
                         task.percent = 100.0
+                elif status == "finished":
+                    info = d.get("info_dict", {})
+                    fn = info.get("_filename") or d.get("filepath")
+                    if fn:
+                        with self._lock:
+                            task.filename = os.path.basename(fn)
 
             def metadata_cb(info_dict: dict[str, Any]) -> None:
                 with self._lock:
@@ -514,10 +545,13 @@ class Downloader:
                     dur = info_dict.get("duration") or 0
                     if dur and task.duration_str == "—":
                         task.duration_str = _format_eta(dur)
+                    if task.raw_title and (not task.title or task.title.startswith("Video #")):
+                        task.title = sanitize_title(task.raw_title)
                 if task.description:
                     self.log(f"[Task #{task.id}] Captured video description ({len(task.description)} chars)")
 
             outtmpl = os.path.join(task.save_dir or get_default_download_dir(), "%(title)s.%(ext)s")
+            ydl_logger = _YDLLogger(log_callback=lambda msg: self.log(f"[Task #{task.id}] {msg}"), task=task)
 
             ydl_opts: dict[str, Any] = {
                 "format": task.format_str or "bestvideo+bestaudio/best",
@@ -525,14 +559,14 @@ class Downloader:
                 "concurrent_fragment_downloads": DEFAULT_CONCURRENT_FRAGMENTS,
                 "continuedl": True,              # Resume from partial .part files
                 "nopart": False,                 # Preserve .part files for resuming
-                "retries": 25,                   # Auto-retry on network drop up to 25 times
-                "fragment_retries": 25,          # Auto-retry broken fragments up to 25 times
+                "retries": 15,                   # Auto-retry on network drop
+                "fragment_retries": 15,          # Auto-retry broken fragments
                 "file_access_retries": 10,
                 "socket_timeout": 30,
                 "progress_hooks": [progress_hook],
                 "postprocessor_hooks": [postprocessor_hook],
-                "logger": _YDLLogger(log_callback=lambda msg: self.log(f"[Task #{task.id}] {msg}")),
-                "ignoreerrors": True,
+                "logger": ydl_logger,
+                "ignoreerrors": False,           # Surface real extraction/download errors
                 "noprogress": True,
                 "quiet": True,
                 "no_warnings": False,
@@ -559,7 +593,23 @@ class Downloader:
                 try:
                     with SanitizedYoutubeDL(ydl_opts, metadata_callback=metadata_cb) as ydl:
                         self.log(f"[Task #{task.id}] Starting extraction & download for {task.url}")
-                        ydl.download([task.url])
+                        ret_code = ydl.download([task.url])
+                        if ret_code != 0:
+                            raise yt_dlp.utils.DownloadError(ydl_logger.last_error or f"Download failed (code {ret_code})")
+
+                    target_dir = task.save_dir or get_default_download_dir()
+                    target_file = ""
+                    if task.filename and os.path.exists(os.path.join(target_dir, task.filename)):
+                        target_file = os.path.join(target_dir, task.filename)
+                    else:
+                        clean_stem = task.title[:45].strip() if task.title else ""
+                        if clean_stem and os.path.exists(target_dir):
+                            for f in os.listdir(target_dir):
+                                if f.endswith((".mp4", ".mkv", ".mp3", ".m4a", ".webm")) and not f.endswith(".part"):
+                                    if clean_stem.lower() in f.lower():
+                                        target_file = os.path.join(target_dir, f)
+                                        task.filename = f
+                                        break
 
                     is_completed = False
                     with self._lock:
@@ -572,7 +622,6 @@ class Downloader:
 
                     if is_completed:
                         self.log(f"[Task #{task.id}] [SUCCESS] Download finished: {task.title}")
-                        target_dir = task.save_dir or get_default_download_dir()
                         try:
                             tracker_file = record_download_history(
                                 {
@@ -585,7 +634,7 @@ class Downloader:
                                     "size": task.total_bytes,
                                     "duration": task.duration_str,
                                     "format": task.format_str,
-                                    "file_path": os.path.join(target_dir, task.filename) if task.filename else "",
+                                    "file_path": target_file or (os.path.join(target_dir, task.filename) if task.filename else ""),
                                 },
                                 save_dir=target_dir,
                                 sync_cloud=False,
@@ -620,26 +669,29 @@ class Downloader:
                             pass
                     break
                 except Exception as e:
-                    if attempt < max_auto_retries and not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
+                    err_str = str(e)
+                    is_fatal = any(term in err_str.lower() for term in ("unsupported url", "private video", "cannot parse data", "login", "requires authentication"))
+                    if attempt < max_auto_retries and not is_fatal and not self._cancel_event.is_set() and task.id not in self._paused_task_ids:
                         with self._lock:
                             task.status = f"AUTO-RESUMING ({attempt}/{max_auto_retries})..."
-                        self.log(f"[Task #{task.id}] Connection interrupted. Auto-resuming ({attempt}/{max_auto_retries})...")
+                        self.log(f"[Task #{task.id}] Connection interrupted ({err_str}). Auto-resuming ({attempt}/{max_auto_retries})...")
                         time.sleep(2)
                         continue
                     else:
                         with self._lock:
                             task.status = "ERROR"
-                            task.error_message = str(e)
-                        self.log(f"[Task #{task.id}] [ERROR] {e}")
+                            task.error_message = err_str.replace("ERROR: ", "").strip()
+                        self.log(f"[Task #{task.id}] [ERROR] {task.error_message}")
                         if self.progress_callback:
                             try:
                                 self.progress_callback(ProgressInfo(
                                     status=DownloadStatus.ERROR,
-                                    error_message=str(e),
+                                    error_message=task.error_message,
                                     title=task.title,
                                 ))
                             except Exception:
                                 pass
+                        break
 
         workers_count = max(1, min(max_parallel, len(tasks_to_run)))
         with ThreadPoolExecutor(max_workers=workers_count) as executor:

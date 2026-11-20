@@ -16,6 +16,17 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from pathlib import Path
 from flask import Flask, jsonify, render_template_string, request, send_file
 
@@ -698,18 +709,30 @@ HTML_TEMPLATE = """
     }
 
     async function pasteClipboardToComposer() {
+        let text = '';
         try {
-            const text = await navigator.clipboard.readText();
-            if (text) {
-                const urls = extractUrls(text);
-                const input = document.getElementById('composer-urls-input');
-                const existing = extractUrls(input.value);
-                const merged = Array.from(new Set([...existing, ...urls]));
-                input.value = merged.join('\\n');
-                updateComposerCount();
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                text = await navigator.clipboard.readText();
             }
         } catch (err) {
-            alert('Clipboard access denied. Please press Ctrl+V directly in the box.');
+            // Permission restricted in webview; fall through to server clipboard
+        }
+        if (!text) {
+            try {
+                const resp = await fetch('/api/clipboard');
+                const data = await resp.json();
+                text = data.text || '';
+            } catch (err) {}
+        }
+        if (text) {
+            const urls = extractUrls(text);
+            const input = document.getElementById('composer-urls-input');
+            const existing = extractUrls(input.value);
+            const merged = Array.from(new Set([...existing, ...urls]));
+            input.value = merged.join('\\n');
+            updateComposerCount();
+        } else {
+            alert('Clipboard is empty or access was restricted. Please press Ctrl+V directly in the box.');
         }
     }
 
@@ -945,6 +968,14 @@ HTML_TEMPLATE = """
 
     // --- ACTIONS ---
     async function startAllTasks() {
+        const input = document.getElementById('composer-urls-input');
+        if (input && currentTab === 'download') {
+            const urls = extractUrls(input.value);
+            if (urls.length > 0) {
+                await submitComposerDownload();
+                return;
+            }
+        }
         await fetch('/api/start_all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parallel: 4 }) });
         fetchStatus();
     }
@@ -1101,6 +1132,30 @@ def index():
         app_tagline=APP_TAGLINE,
         app_version=APP_VERSION,
     )
+
+
+@app.route("/api/clipboard")
+def get_clipboard():
+    text = ""
+    try:
+        import ctypes
+        if ctypes.windll.user32.OpenClipboard(0):
+            h_clip = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT
+            if h_clip:
+                text = ctypes.c_wchar_p(h_clip).value or ""
+            ctypes.windll.user32.CloseClipboard()
+    except Exception:
+        pass
+    if not text:
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            text = root.clipboard_get()
+            root.destroy()
+        except Exception:
+            pass
+    return jsonify({"text": text or ""})
 
 
 @app.route("/api/download", methods=["POST"])
@@ -1285,6 +1340,14 @@ if __name__ == "__main__":
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", port))
     except OSError:
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=0.5) as r:
+                if r.status == 200:
+                    webbrowser.open(f"http://127.0.0.1:{port}")
+                    sys.exit(0)
+        except Exception:
+            pass
         port = _find_free_port()
 
     # Suppress werkzeug logging for desktop cleanliness
