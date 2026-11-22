@@ -441,14 +441,23 @@ HTML_TEMPLATE = """
                     </div>
 
                     <!-- Large Multi-Line Textarea with Auto-Break Formatter -->
-                    <textarea id="composer-urls-input" class="composer-textarea" placeholder="Paste video or audio links here (one link per line)...&#10;Paste individual links, comma-separated lists, or large blocks: links will automatically be extracted and formatted onto individual lines with line breaks!&#10;&#10;Supports: Facebook (Videos & Reels), YouTube, Instagram, TikTok, Twitter/X, and 1,000+ sources."></textarea>
+                    <textarea id="composer-urls-input" class="composer-textarea" oninput="updateComposerCount()" onchange="updateComposerCount()" onkeyup="updateComposerCount()" onpaste="setTimeout(formatTextareaWithLineBreakers, 30)" placeholder="Paste video or audio links here (one link per line)...&#10;Paste individual links, comma-separated lists, or large blocks: links will automatically be extracted and formatted onto individual lines with line breaks!&#10;&#10;Supports: Facebook (Videos & Reels), YouTube, Instagram, TikTok, Twitter/X, and 1,000+ sources."></textarea>
 
                     <div class="composer-btn-bar">
                         <div class="action-group-left">
                             <button class="composer-btn" onclick="pasteClipboardToComposer()">
                                 <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #2563eb;"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
-                                <span>Paste from Clipboard</span>
+                                <span>Paste Link</span>
                             </button>
+                            <button class="composer-btn" onclick="loadCleanedFacebookLinks()" title="Instantly load the saved 546 Facebook links">
+                                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #16a34a;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                                <span>Load All 546 Links</span>
+                            </button>
+                            <label class="composer-btn" style="cursor: pointer;" title="Import links from any .txt or .csv file">
+                                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #d97706;"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+                                <span>Load from File...</span>
+                                <input type="file" id="file-link-input" accept=".txt,.csv" style="display: none;" onchange="importLinksFromFile(event)">
+                            </label>
                             <button class="composer-btn danger" onclick="clearComposer()">
                                 <span>Clear</span>
                             </button>
@@ -745,6 +754,40 @@ HTML_TEMPLATE = """
         const input = document.getElementById('composer-urls-input');
         input.value = '';
         updateComposerCount();
+    }
+
+    async function loadCleanedFacebookLinks() {
+        try {
+            const resp = await fetch('/api/cleaned_links');
+            const data = await resp.json();
+            if (data.urls && data.urls.length > 0) {
+                const input = document.getElementById('composer-urls-input');
+                input.value = data.urls.join('\\n');
+                updateComposerCount();
+            } else {
+                alert('No saved links file found on disk.');
+            }
+        } catch (e) {
+            alert('Failed to load links: ' + e);
+        }
+    }
+
+    function importLinksFromFile(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const content = e.target.result;
+            if (content) {
+                const urls = extractUrls(content);
+                const input = document.getElementById('composer-urls-input');
+                const existing = extractUrls(input.value);
+                const merged = Array.from(new Set([...existing, ...urls]));
+                input.value = merged.join('\\n');
+                updateComposerCount();
+            }
+        };
+        reader.readAsText(file);
     }
 
     // --- SUBMIT DOWNLOADS ---
@@ -1139,23 +1182,60 @@ def get_clipboard():
     text = ""
     try:
         import ctypes
-        if ctypes.windll.user32.OpenClipboard(0):
-            h_clip = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT
-            if h_clip:
-                text = ctypes.c_wchar_p(h_clip).value or ""
-            ctypes.windll.user32.CloseClipboard()
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.CloseClipboard.argtypes = []
+        user32.CloseClipboard.restype = wintypes.BOOL
+        user32.GetClipboardData.argtypes = [wintypes.UINT]
+        user32.GetClipboardData.restype = wintypes.HANDLE
+        user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+        user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = wintypes.LPVOID
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.restype = wintypes.BOOL
+
+        CF_UNICODETEXT = 13
+        if user32.OpenClipboard(None):
+            try:
+                if user32.IsClipboardFormatAvailable(CF_UNICODETEXT):
+                    h_mem = user32.GetClipboardData(CF_UNICODETEXT)
+                    if h_mem:
+                        p_mem = kernel32.GlobalLock(h_mem)
+                        if p_mem:
+                            try:
+                                text = ctypes.wstring_at(p_mem)
+                            finally:
+                                kernel32.GlobalUnlock(h_mem)
+            finally:
+                user32.CloseClipboard()
     except Exception:
         pass
-    if not text:
-        try:
-            import tkinter as tk
-            root = tk.Tk()
-            root.withdraw()
-            text = root.clipboard_get()
-            root.destroy()
-        except Exception:
-            pass
     return jsonify({"text": text or ""})
+
+
+@app.route("/api/cleaned_links")
+def get_cleaned_links():
+    search_dirs = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.dirname(sys.executable),
+        os.getcwd(),
+    ]
+    for d in search_dirs:
+        p = os.path.join(d, "cleaned_facebook_links.txt")
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    urls = [line.strip() for line in f if line.strip().startswith("http")]
+                return jsonify({"urls": urls, "count": len(urls)})
+            except Exception:
+                pass
+    return jsonify({"urls": [], "count": 0})
 
 
 @app.route("/api/download", methods=["POST"])

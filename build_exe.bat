@@ -18,6 +18,11 @@ if exist "ffmpeg.exe" (
     copy /y "ffmpeg.exe" "dist\StreamVaultPro\ffmpeg.exe" >nul
 )
 
+if exist "cleaned_facebook_links.txt" (
+    echo Bundling cleaned_facebook_links.txt into dist directory...
+    copy /y "cleaned_facebook_links.txt" "dist\StreamVaultPro\cleaned_facebook_links.txt" >nul
+)
+
 echo Stripping redundant .py source files to prevent Windows Defender locks...
 powershell -NoProfile -Command "Get-ChildItem -Path 'dist\StreamVaultPro' -Recurse -Filter '*.py' | Remove-Item -Force"
 
@@ -33,4 +38,4 @@ echo  Portable Zip:  StreamVaultPro.zip
 echo ========================================================
 echo.
 
-powershell -NoProfile -Command "$iscc = Get-ChildItem -Path '$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe', 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe', 'C:\Program Files\Inno Setup 6\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName; if ($iscc) { Write-Host 'Compiling Windows Installer (StreamVaultPro_Setup.exe)...'; & $iscc installer.iss; Write-Host '========================================================'; Write-Host ' Installer created at: dist_installer\StreamVaultPro_Setup.exe'; Write-Host '========================================================' }"
+powershell -NoProfile -Command "$paths = @(\"$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe\", 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe', 'C:\Program Files\Inno Setup 6\ISCC.exe'); $iscc = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1; if ($iscc) { Write-Host 'Compiling Windows Installer (StreamVaultPro_Setup.exe)...'; & $iscc installer.iss; Write-Host '========================================================'; Write-Host ' Installer created at: dist_installer\StreamVaultPro_Setup.exe'; Write-Host '========================================================' } else { Write-Warning 'ISCC.exe not found. Installer was not compiled.' }"
