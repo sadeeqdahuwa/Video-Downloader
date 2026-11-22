@@ -691,7 +691,6 @@ HTML_TEMPLATE = """
 
     // --- URL EXTRACTION & FORMATTING ---
     // Bulletproof: handles spaces, tabs, commas, newlines, quotes, brackets.
-    // Every single URL is extracted and formatted onto its own line with \n!
     function extractUrls(text) {
         if (!text) return [];
         // Auto-prefix domains without protocol
@@ -700,13 +699,18 @@ HTML_TEMPLATE = """
         const matches = normalized.match(regex) || [];
         return Array.from(new Set(matches.map(u => u.trim().replace(/[)\\]'",;]+$/, '')))).filter(u => u.length > 10);
     }
+    window.extractUrls = extractUrls;
 
     function updateComposerCount() {
         const input = document.getElementById('composer-urls-input');
+        if (!input) return;
         const urls = extractUrls(input.value);
         const badge = document.getElementById('composer-count-badge');
-        badge.textContent = `${urls.length} link(s) detected`;
+        if (badge) {
+            badge.textContent = `${urls.length} link(s) detected`;
+        }
     }
+    window.updateComposerCount = updateComposerCount;
 
     function formatTextareaWithLineBreakers() {
         const input = document.getElementById('composer-urls-input');
@@ -763,6 +767,10 @@ HTML_TEMPLATE = """
             if (data.urls && data.urls.length > 0) {
                 const input = document.getElementById('composer-urls-input');
                 input.value = data.urls.join('\\n');
+                const badge = document.getElementById('composer-count-badge');
+                if (badge) {
+                    badge.textContent = `${data.urls.length} link(s) detected`;
+                }
                 updateComposerCount();
             } else {
                 alert('No saved links file found on disk.');
@@ -1072,18 +1080,30 @@ HTML_TEMPLATE = """
     }
 
     // --- MODALS ---
+    let logsPollTimer = null;
     function openLogsModal() {
         document.getElementById('logs-modal').style.display = 'flex';
         fetchLogs();
+        if (logsPollTimer) clearInterval(logsPollTimer);
+        logsPollTimer = setInterval(fetchLogs, 1500);
     }
-    function closeLogsModal() { document.getElementById('logs-modal').style.display = 'none'; }
+    function closeLogsModal() {
+        document.getElementById('logs-modal').style.display = 'none';
+        if (logsPollTimer) clearInterval(logsPollTimer);
+        logsPollTimer = null;
+    }
 
     async function fetchLogs() {
-        const resp = await fetch('/api/logs');
-        const data = await resp.json();
-        const ta = document.getElementById('logs-textarea');
-        ta.value = (data.logs || []).join('\\n');
-        ta.scrollTop = ta.scrollHeight;
+        try {
+            const resp = await fetch('/api/logs');
+            const data = await resp.json();
+            const ta = document.getElementById('logs-textarea');
+            if (ta) {
+                const logs = data.logs || [];
+                ta.value = logs.length > 0 ? logs.join('\\n') : '[No logs recorded yet. Start a download to view live engine output.]';
+                ta.scrollTop = ta.scrollHeight;
+            }
+        } catch (e) {}
     }
 
     function copyLogs() {
@@ -1232,6 +1252,7 @@ def get_cleaned_links():
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     urls = [line.strip() for line in f if line.strip().startswith("http")]
+                downloader.log(f"Cleaned links loaded: {len(urls)} URLs ready.")
                 return jsonify({"urls": urls, "count": len(urls)})
             except Exception:
                 pass
@@ -1251,6 +1272,7 @@ def start_download():
 
     format_str = QUALITY_OPTIONS.get(quality, "bestvideo+bestaudio/best")
     os.makedirs(save_dir, exist_ok=True)
+    downloader.log(f"Download request received: starting batch of {len(urls)} URLs.")
 
     downloader.start_download_async(
         urls=urls,

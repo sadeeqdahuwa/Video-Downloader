@@ -337,6 +337,7 @@ class Downloader:
                 self.tasks.append(task)
                 new_tasks.append(task)
 
+        self.log(f"Queued {len(new_tasks)} links for download (Parallel: {max_parallel}x, Quality: {format_str})")
         self._start_pool_on_tasks(new_tasks, max_parallel)
 
     def start_all_unfinished(self, max_parallel: int = 4) -> int:
