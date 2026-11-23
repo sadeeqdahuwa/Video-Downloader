@@ -449,7 +449,11 @@ HTML_TEMPLATE = """
                                 <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #2563eb;"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
                                 <span>Paste Link</span>
                             </button>
-                            <button class="composer-btn" onclick="loadCleanedFacebookLinks()" title="Instantly load the saved 546 Facebook links">
+                            <button class="composer-btn" onclick="loadCleanedFacebookLinks(true)" id="btn-load-remaining" style="background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; font-weight: 600;" title="Load only the remaining unfinished links (skips already downloaded videos)">
+                                <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #2563eb;"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                                <span id="btn-load-remaining-text">Resume Remaining Links</span>
+                            </button>
+                            <button class="composer-btn" onclick="loadCleanedFacebookLinks(false)" title="Load all 546 Facebook links">
                                 <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: #16a34a;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                                 <span>Load All 546 Links</span>
                             </button>
@@ -760,20 +764,28 @@ HTML_TEMPLATE = """
         updateComposerCount();
     }
 
-    async function loadCleanedFacebookLinks() {
+    async function loadCleanedFacebookLinks(onlyRemaining = false) {
         try {
             const resp = await fetch('/api/cleaned_links');
             const data = await resp.json();
-            if (data.urls && data.urls.length > 0) {
+            const targetUrls = (onlyRemaining && data.remaining_urls) ? data.remaining_urls : data.urls;
+            if (targetUrls && targetUrls.length > 0) {
                 const input = document.getElementById('composer-urls-input');
-                input.value = data.urls.join('\\n');
+                input.value = targetUrls.join('\\n');
                 const badge = document.getElementById('composer-count-badge');
                 if (badge) {
-                    badge.textContent = `${data.urls.length} link(s) detected`;
+                    badge.textContent = `${targetUrls.length} link(s) detected`;
                 }
                 updateComposerCount();
+                if (onlyRemaining) {
+                    alert(`Loaded ${targetUrls.length} remaining links! (${data.completed_count || 0} already completed videos were automatically skipped).`);
+                }
             } else {
-                alert('No saved links file found on disk.');
+                if (onlyRemaining && data.completed_count > 0) {
+                    alert(`All ${data.completed_count} videos from this batch are already downloaded! View them in Tasks or History.`);
+                } else {
+                    alert('No saved links file found on disk.');
+                }
             }
         } catch (e) {
             alert('Failed to load links: ' + e);
@@ -1171,6 +1183,17 @@ HTML_TEMPLATE = """
         // Poll status every 1000ms
         setInterval(fetchStatus, 1000);
         fetchStatus();
+
+        // Check remaining links to update button text
+        fetch('/api/cleaned_links')
+            .then(r => r.json())
+            .then(d => {
+                if (d.remaining_count !== undefined) {
+                    const btn = document.getElementById('btn-load-remaining-text');
+                    if (btn) btn.textContent = `Resume Remaining (${d.remaining_count})`;
+                }
+            })
+            .catch(() => {});
     });
 </script>
 </body>
@@ -1246,17 +1269,44 @@ def get_cleaned_links():
         os.path.dirname(sys.executable),
         os.getcwd(),
     ]
+    all_urls = []
     for d in search_dirs:
         p = os.path.join(d, "cleaned_facebook_links.txt")
         if os.path.isfile(p):
             try:
                 with open(p, "r", encoding="utf-8") as f:
-                    urls = [line.strip() for line in f if line.strip().startswith("http")]
-                downloader.log(f"Cleaned links loaded: {len(urls)} URLs ready.")
-                return jsonify({"urls": urls, "count": len(urls)})
+                    all_urls = [line.strip() for line in f if line.strip().startswith("http")]
+                break
             except Exception:
                 pass
-    return jsonify({"urls": [], "count": 0})
+
+    completed_urls = set()
+    for t in downloader.tasks:
+        if t.status == "COMPLETED":
+            completed_urls.add(t.url)
+
+    history_csv = os.path.join(get_default_download_dir(), "download_history.csv")
+    if os.path.isfile(history_csv):
+        try:
+            import csv
+            with open(history_csv, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    u = row.get("Video URL", "").strip()
+                    if u and row.get("Status", "").strip().upper() == "COMPLETED":
+                        completed_urls.add(u)
+        except Exception:
+            pass
+
+    remaining_urls = [u for u in all_urls if u not in completed_urls]
+    return jsonify({
+        "urls": all_urls,
+        "remaining_urls": remaining_urls,
+        "completed_urls": list(completed_urls),
+        "count": len(all_urls),
+        "remaining_count": len(remaining_urls),
+        "completed_count": len(completed_urls),
+    })
 
 
 @app.route("/api/download", methods=["POST"])

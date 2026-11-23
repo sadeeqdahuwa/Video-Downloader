@@ -34,7 +34,8 @@ if sys.platform == "win32":
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-from core.config import APP_NAME, DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir
+import json
+from core.config import APP_NAME, DEFAULT_CONCURRENT_FRAGMENTS, find_ffmpeg, get_default_download_dir, get_app_data_dir
 from core.history_tracker import get_tracker_path, record_download_history
 from core.title_sanitizer import sanitize_title
 
@@ -114,6 +115,27 @@ class TaskProgress:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TaskProgress:
+        return cls(
+            id=int(data.get("id", 1)),
+            url=str(data.get("url", "")),
+            title=str(data.get("title", "Queued...")),
+            raw_title=str(data.get("raw_title", "")),
+            description=str(data.get("description", "")),
+            duration_str=str(data.get("duration_str", "—")),
+            status=str(data.get("status", "PAUSED")),
+            percent=float(data.get("percent", 0.0)),
+            speed=str(data.get("speed", "—")),
+            eta=str(data.get("eta", "—")),
+            total_bytes=str(data.get("total_bytes", "—")),
+            downloaded_bytes=str(data.get("downloaded_bytes", "—")),
+            filename=str(data.get("filename", "")),
+            error_message=str(data.get("error_message", "")),
+            save_dir=str(data.get("save_dir", "")),
+            format_str=str(data.get("format_str", "bestvideo+bestaudio/best")),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +255,136 @@ class Downloader:
         self._manager_thread: threading.Thread | None = None
         self._is_running = False
         self._next_id = 1
+        self.load_tasks_from_disk()
         self.log(f"{APP_NAME} engine initialized (4x parallel mode).")
+
+    def save_tasks_to_disk(self) -> None:
+        """Persist current task list to tasks.json so tasks and progress survive restarts."""
+        try:
+            tasks_file = os.path.join(get_app_data_dir(), "tasks.json")
+            with self._lock:
+                tasks_data = [t.to_dict() for t in self.tasks]
+            tmp_file = tasks_file + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(tasks_data, f, indent=2, ensure_ascii=False)
+            if os.path.exists(tmp_file):
+                os.replace(tmp_file, tasks_file)
+        except Exception as e:
+            try:
+                self.log(f"[Warning] Failed to persist tasks to disk: {e}")
+            except Exception:
+                pass
+
+    def load_tasks_from_disk(self) -> None:
+        """Load tasks from tasks.json, or reconstruct from download_history.csv + cleaned_facebook_links.txt."""
+        tasks_file = os.path.join(get_app_data_dir(), "tasks.json")
+        loaded_tasks: list[TaskProgress] = []
+        if os.path.isfile(tasks_file):
+            try:
+                with open(tasks_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    for item in data:
+                        t = TaskProgress.from_dict(item)
+                        if t.status in ("DOWNLOADING", "CONNECTING", "POST_PROCESSING", "QUEUED"):
+                            t.status = "PAUSED"
+                            t.speed = "—"
+                            t.eta = "—"
+                        loaded_tasks.append(t)
+            except Exception as e:
+                self.log(f"[Warning] Could not read tasks.json: {e}")
+
+        # If tasks.json was empty or missing, reconstruct from download_history.csv & cleaned_facebook_links.txt
+        if not loaded_tasks:
+            loaded_tasks = self._reconstruct_tasks_from_history()
+
+        with self._lock:
+            self.tasks = loaded_tasks
+            if self.tasks:
+                self._next_id = max((t.id for t in self.tasks), default=0) + 1
+            completed_c = sum(1 for t in self.tasks if t.status == "COMPLETED")
+            paused_c = sum(1 for t in self.tasks if t.status == "PAUSED")
+            self.log(f"Restored {len(self.tasks)} persistent tasks ({completed_c} completed, {paused_c} ready to resume).")
+
+        # Save back to ensure tasks.json exists immediately
+        self.save_tasks_to_disk()
+
+    def _reconstruct_tasks_from_history(self) -> list[TaskProgress]:
+        """Automatically reconstruct task list from download_history.csv and cleaned_facebook_links.txt."""
+        tasks: list[TaskProgress] = []
+        downloaded_urls: dict[str, dict[str, Any]] = {}
+        history_csv = os.path.join(get_default_download_dir(), "download_history.csv")
+        if not os.path.isfile(history_csv):
+            history_csv = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tracker", "download_history.csv")
+
+        if os.path.isfile(history_csv):
+            try:
+                import csv
+                with open(history_csv, "r", encoding="utf-8-sig") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        u = row.get("Video URL", "").strip()
+                        st = row.get("Status", "").strip().upper()
+                        if u and st == "COMPLETED":
+                            downloaded_urls[u] = row
+            except Exception:
+                pass
+
+        tid = 1
+        for u, row in downloaded_urls.items():
+            tasks.append(
+                TaskProgress(
+                    id=tid,
+                    url=u,
+                    title=row.get("Clean Title") or row.get("Raw Title") or f"Video #{tid}",
+                    raw_title=row.get("Raw Title") or "",
+                    description=row.get("Full Description (Full Post Text)") or "",
+                    duration_str=row.get("Duration") or "—",
+                    status="COMPLETED",
+                    percent=100.0,
+                    speed="—",
+                    eta="—",
+                    total_bytes=row.get("File Size") or "—",
+                    downloaded_bytes=row.get("File Size") or "—",
+                    filename=row.get("Saved Filename") or "",
+                    save_dir=row.get("File Path") or get_default_download_dir(),
+                )
+            )
+            tid += 1
+
+        search_dirs = [
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(sys.executable),
+            os.getcwd(),
+        ]
+        links_file = None
+        for d in search_dirs:
+            p = os.path.join(d, "cleaned_facebook_links.txt")
+            if os.path.isfile(p):
+                links_file = p
+                break
+
+        if links_file:
+            try:
+                with open(links_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_u = line.strip()
+                        if line_u.startswith("http") and line_u not in downloaded_urls:
+                            tasks.append(
+                                TaskProgress(
+                                    id=tid,
+                                    url=line_u,
+                                    title=f"Video #{tid}",
+                                    status="PAUSED",
+                                    percent=0.0,
+                                    save_dir=get_default_download_dir(),
+                                )
+                            )
+                            tid += 1
+            except Exception:
+                pass
+
+        return tasks
 
     def log(self, msg: str) -> None:
         """Record a timestamped log line to memory, stdout, and downloader.log file."""
@@ -324,7 +475,22 @@ class Downloader:
 
         new_tasks = []
         with self._lock:
+            existing_by_url = {t.url: t for t in self.tasks}
             for i, u in enumerate(url_list):
+                if u in existing_by_url:
+                    existing = existing_by_url[u]
+                    if existing.status == "COMPLETED":
+                        target_dir = existing.save_dir or save_dir
+                        target_file = os.path.join(target_dir, existing.filename) if existing.filename else ""
+                        if target_file and os.path.isfile(target_file):
+                            continue
+                    existing.status = "QUEUED"
+                    existing.error_message = ""
+                    existing.save_dir = save_dir
+                    existing.format_str = format_str
+                    new_tasks.append(existing)
+                    continue
+
                 task = TaskProgress(
                     id=self._next_id,
                     url=u,
@@ -337,8 +503,11 @@ class Downloader:
                 self.tasks.append(task)
                 new_tasks.append(task)
 
+            self.save_tasks_to_disk()
+
         self.log(f"Queued {len(new_tasks)} links for download (Parallel: {max_parallel}x, Quality: {format_str})")
-        self._start_pool_on_tasks(new_tasks, max_parallel)
+        if new_tasks:
+            self._start_pool_on_tasks(new_tasks, max_parallel)
 
     def start_all_unfinished(self, max_parallel: int = 4) -> int:
         """
@@ -353,6 +522,7 @@ class Downloader:
                     t.status = "QUEUED"
                     t.error_message = ""
                     unfinished.append(t)
+            self.save_tasks_to_disk()
 
         if unfinished:
             self._start_pool_on_tasks(unfinished, max_parallel)
@@ -369,6 +539,7 @@ class Downloader:
                     t.error_message = ""
                     target = t
                     break
+            self.save_tasks_to_disk()
 
         if target:
             self._start_pool_on_tasks([target], max_parallel)
@@ -383,6 +554,7 @@ class Downloader:
                 if t.id == task_id:
                     if t.status in ("QUEUED", "CONNECTING", "DOWNLOADING", "POST_PROCESSING"):
                         t.status = "PAUSED"
+                    self.save_tasks_to_disk()
                     return True
         return False
 
@@ -397,6 +569,7 @@ class Downloader:
                 if task.status in ("QUEUED", "CONNECTING", "DOWNLOADING", "POST_PROCESSING"):
                     task.status = "PAUSED"
             self._is_running = False
+            self.save_tasks_to_disk()
 
     def cancel(self) -> None:
         """Alias for pause_all."""
@@ -406,12 +579,14 @@ class Downloader:
         """Remove completed tasks from list."""
         with self._lock:
             self.tasks = [t for t in self.tasks if t.status != "COMPLETED"]
+            self.save_tasks_to_disk()
 
     def remove_task(self, task_id: int) -> None:
         """Remove a task by ID."""
         with self._lock:
             self._paused_task_ids.discard(task_id)
             self.tasks = [t for t in self.tasks if t.id != task_id]
+            self.save_tasks_to_disk()
 
     def clear_all(self) -> None:
         """Clear all tasks."""
@@ -421,6 +596,7 @@ class Downloader:
             self._paused_task_ids.clear()
             self.tasks = []
             self._next_id = 1
+            self.save_tasks_to_disk()
 
     @property
     def is_busy(self) -> bool:
@@ -654,11 +830,13 @@ class Downloader:
                                 ))
                             except Exception:
                                 pass
+                        self.save_tasks_to_disk()
                     break
 
                 except yt_dlp.utils.DownloadCancelled:
                     with self._lock:
                         task.status = "PAUSED"
+                    self.save_tasks_to_disk()
                     self.log(f"[Task #{task.id}] Download paused.")
                     if self.progress_callback:
                         try:
@@ -682,6 +860,7 @@ class Downloader:
                         with self._lock:
                             task.status = "ERROR"
                             task.error_message = err_str.replace("ERROR: ", "").strip()
+                        self.save_tasks_to_disk()
                         self.log(f"[Task #{task.id}] [ERROR] {task.error_message}")
                         if self.progress_callback:
                             try:

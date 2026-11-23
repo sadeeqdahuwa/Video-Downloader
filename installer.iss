@@ -2,7 +2,7 @@
 ; Production Windows Installer
 
 #define MyAppName "StreamVault Pro"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "StreamVault Team"
 #define MyAppURL "https://github.com/sadeeqdahuwa/Video-Downloader"
 #define MyAppExeName "StreamVaultPro.exe"
@@ -33,11 +33,11 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 AppMutex=StreamVaultProAppMutex
-VersionInfoVersion=1.0.4.0
+VersionInfoVersion=1.0.5.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=1.0.4.0
+VersionInfoProductVersion=1.0.5.0
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

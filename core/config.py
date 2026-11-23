@@ -27,6 +27,14 @@ def _load_env_file() -> None:
 _load_env_file()
 
 
+def get_app_data_dir() -> str:
+    """Return persistent user application data folder: %LOCALAPPDATA%\\StreamVaultPro or fallback."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+    d = os.path.join(base, "StreamVaultPro")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Default download directory
 # ---------------------------------------------------------------------------
@@ -111,4 +119,4 @@ def find_ffmpeg() -> str | None:
 # ---------------------------------------------------------------------------
 APP_NAME = "StreamVault Pro"
 APP_TAGLINE = "High-Performance Multi-Source Video Downloader & Archiver"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
